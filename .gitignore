@@ -1,3 +1,7 @@
+# Custom
+embeddings.cache
+documents.duckdb
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
