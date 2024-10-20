@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "duckdb-vss-api"
+version = "0.1.0"
+description = "Deploy simple vector similarity search service by duckdb."
+authors = ["Allen Chou <f1470891079@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0"
+pydantic = "^2"
+diskcache = "^5.6.3"
+
+[tool.poetry.extras]
+all = []
+
+[tool.poetry.group.docs.dependencies]
+mkdocs-git-authors-plugin = "*"
+mkdocs-git-committers-plugin-2 = "*"
+mkdocs-git-revision-date-localized-plugin = "*"
+mkdocs-material = "^9"
+mkdocs-minify-plugin = "*"
+mkdocs-nav-weight = "*"
+mkdocs-redirects = "*"
+mkdocs-render-swagger-plugin = "*"
+neoteroi-mkdocs = "*"
+
+[tool.poetry.group.dev.dependencies]
+black = "*"
+isort = "*"
+poetry-plugin-export = "^1.6.0"
+pytest = "^8"
+pytest-asyncio = "*"
+pytest-cov = "^4"
+pytest-xdist = "^3"
+setuptools = ">=69"
+
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+ignore = ["E203", "E704", "W503"]
+max-line-length = 88
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
