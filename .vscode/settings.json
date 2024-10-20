@@ -1,0 +1,52 @@
+{
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+  "[yml]": {
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
+  "[yaml]": {
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
+  "[dockercompose]": {
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
+  "[md]": {
+    "editor.tabSize": 4,
+    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
+  },
+  "[markdown]": {
+    "editor.tabSize": 4,
+    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
+  },
+  "[json]": {
+    "editor.tabSize": 2,
+    "editor.quickSuggestions": {
+      "strings": true
+    },
+    "editor.suggest.insertMode": "replace"
+  },
+  "[toml]": {
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "tamasfe.even-better-toml"
+  },
+  "markdownlint.config": {
+    "MD007": {
+      "indent": 4
+    },
+    "MD031": {
+      "list_items": false
+    }
+  },
+  "vscode-yaml-sort.quotingType": "\"",
+  "evenBetterToml.formatter.reorderKeys": true,
+  "evenBetterToml.formatter.reorderArrays": true,
+  "flake8.args": [
+    "--ignore=E203,E704,W503",
+    "--max-line-length=88",
+  ],
+}
