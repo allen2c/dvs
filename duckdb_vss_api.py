@@ -246,7 +246,11 @@ app.state.settings = app.extra["settings"] = settings
 app.state.cache = app.extra["cache"] = Cache(
     directory=settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT
 )
-# app.state.cache = app.extra["cache"] = duckdb.connect(settings.DUCKDB_PATH)
+with duckdb.connect(settings.DUCKDB_PATH) as conn:
+    conn.sql("INSTALL json;")
+    conn.sql("LOAD json;")
+    conn.sql("INSTALL vss;")
+    conn.sql("LOAD vss;")
 if settings.OPENAI_API_KEY is None:
     app.state.openai_client = app.extra["openai_client"] = None
 else:
