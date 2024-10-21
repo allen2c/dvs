@@ -1,17 +1,18 @@
 [tool.poetry]
-name = "duckdb-vss-api"
-version = "0.1.0"
-description = "Deploy simple vector similarity search service by duckdb."
 authors = ["Allen Chou <f1470891079@gmail.com>"]
+description = "Deploy simple vector similarity search service by duckdb."
 license = "MIT"
+name = "duckdb-vss-api"
 readme = "README.md"
+version = "0.1.0"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+diskcache = "*"
+duckdb = ">=0.10.2"
 fastapi = { version = "^0", extras = ["standard"] }
 pydantic = "^2"
-diskcache = "*"
 pydantic-settings = "*"
+python = "^3.12"
 
 [tool.poetry.extras]
 all = []
@@ -47,5 +48,5 @@ max-line-length = 88
 
 
 [build-system]
-requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core"]
