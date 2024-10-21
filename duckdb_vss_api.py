@@ -1,5 +1,6 @@
 import base64
 import binascii
+import json
 import pathlib
 import time
 from textwrap import dedent
@@ -9,7 +10,7 @@ import duckdb
 import numpy as np
 import openai
 from diskcache import Cache
-from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -81,8 +82,9 @@ def vector_search(
     points_table_name: Text,
     conn: "duckdb.DuckDBPyConnection",
     with_embedding: bool = True,
-    with_documents: bool = True,
 ) -> List[Tuple["Point", Optional["Document"], float]]:
+    output: List[Tuple["Point", Optional["Document"], float]] = []
+
     column_names_expr = ", ".join(
         list(
             column_names_with_embedding
@@ -101,12 +103,22 @@ def vector_search(
 
     # Fetch results
     result = conn.execute(query, params)
+
+    # Convert to output format
     assert result.description is not None
-    rows_as_dict = [
-        dict(zip([desc[0] for desc in result.description], row))
-        for row in result.fetchall()
-    ]
-    return rows_as_dict
+    for row in result.fetchall():
+        row_dict = dict(zip([desc[0] for desc in result.description], row))
+        row_dict["metadata"] = json.loads(row_dict.get("metadata") or "{}")
+        row_dict["embedding"] = row_dict.get("embedding") or []
+        output.append(
+            (
+                Point.model_validate(row_dict),
+                Document.model_validate(row_dict),
+                row_dict["relevance_score"],
+            )
+        )
+
+    return output
 
 
 class Settings(BaseSettings):
@@ -140,7 +152,6 @@ class Point(BaseModel):
     document_id: Text
     content_md5: Text
     embedding: List[float]
-    relevance_score: float
 
 
 class Document(BaseModel):
@@ -157,12 +168,17 @@ class SearchRequest(BaseModel):
     query: Text | List[float]
     top_k: int = Field(default=5)
     with_embedding: bool = Field(default=False)
-    with_documents: bool = Field(default=False)
+
+
+class SearchResult(BaseModel):
+    point: Point
+    document: Optional[Document] = Field(default=None)
+    relevance_score: float = Field(default=0.0)
 
 
 class SearchResponse(BaseModel):
-    matched: List[Point] = Field(default_factory=list)
-    documents: List[Document] = Field(default_factory=list)
+    results: List[SearchResult] = Field(default_factory=list)
+    elapsed_time_ms: float = Field(default=0.0)
 
 
 settings = Settings()
@@ -190,6 +206,7 @@ async def api_root():
 @app.post("/s")
 @app.post("/search")
 async def api_search(
+    debug: bool = Query(default=False),
     request: SearchRequest = Body(
         ...,
         openapi_examples={
@@ -199,7 +216,6 @@ async def api_search(
                     "query": "How is Amazon?",
                     "top_k": 5,
                     "with_embedding": False,
-                    "with_documents": False,
                 },
             },
         },
@@ -207,12 +223,15 @@ async def api_search(
     conn: duckdb.DuckDBPyConnection = Depends(
         lambda: duckdb.connect(settings.DUCKDB_PATH)
     ),
+    time_start: float = Depends(lambda: time.perf_counter()),
 ):
     request.query = (
         request.query.strip() if isinstance(request.query, Text) else request.query
     )
     if not request.query:
-        raise HTTPException(status_code=400, detail="Query is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Query is required"
+        )
     if isinstance(request.query, Text):
         might_be_vector = decode_base64_to_vector(request.query)
         if might_be_vector is None:
@@ -226,7 +245,7 @@ async def api_search(
     else:
         vector = request.query
 
-    return vector_search(
+    search_results = vector_search(
         vector,
         top_k=request.top_k,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
@@ -234,5 +253,23 @@ async def api_search(
         points_table_name=settings.POINTS_TABLE_NAME,
         conn=conn,
         with_embedding=request.with_embedding,
-        with_documents=request.with_documents,
+    )
+
+    # Return results
+    time_end = time.perf_counter()
+    elapsed_time_ms = (time_end - time_start) * 1000
+    if debug:
+        print(f"Elapsed time: {elapsed_time_ms:.2f} ms")
+    return SearchResponse.model_validate(
+        {
+            "results": [
+                {
+                    "point": res[0],
+                    "document": res[1],
+                    "relevance_score": res[2],
+                }
+                for res in search_results
+            ],
+            "elapsed_time_ms": elapsed_time_ms,
+        }
     )
