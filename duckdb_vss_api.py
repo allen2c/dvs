@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import binascii
 import json
@@ -32,7 +33,7 @@ sql_stmt_vss = dedent(
 ).strip()
 
 
-def to_vector_with_cache(
+async def to_vector_with_cache(
     queries: Union[List[Text], Text], *, cache: Cache, openai_client: "openai.OpenAI"
 ) -> List[List[float]]:
     """"""
@@ -41,7 +42,7 @@ def to_vector_with_cache(
     output_vectors: List[Optional[List[float]]] = [None] * len(queries)
     not_cached_indices: List[int] = []
     for idx, query in enumerate(queries):
-        cached_vector = cache.get(query)
+        cached_vector = await asyncio.to_thread(cache.get, query)
         if cached_vector is None:
             not_cached_indices.append(idx)
         else:
@@ -50,13 +51,15 @@ def to_vector_with_cache(
     # Get embeddings for queries that are not cached
     if not_cached_indices:
         not_cached_queries = [queries[i] for i in not_cached_indices]
-        embeddings_result = openai_client.embeddings.create(
+        embeddings_response = await asyncio.to_thread(
+            openai_client.embeddings.create,
             input=not_cached_queries,
             model=settings.EMBEDDING_MODEL,
             dimensions=settings.EMBEDDING_DIMENSIONS,
-        ).data
-        for idx, embedding in zip(not_cached_indices, embeddings_result):
-            cache.set(queries[idx], embedding.embedding)
+        )
+        embeddings_data = embeddings_response.data
+        for idx, embedding in zip(not_cached_indices, embeddings_data):
+            await asyncio.to_thread(cache.set, queries[idx], embedding.embedding)
             output_vectors[idx] = embedding.embedding  # type: ignore
 
     if any(v is None for v in output_vectors):
@@ -73,7 +76,7 @@ def decode_base64_to_vector(base64_str: Text) -> Optional[List[float]]:
         return None  # not a base64 encoded string
 
 
-def vector_search(
+async def vector_search(
     vector: List[float],
     *,
     top_k: int,
@@ -102,11 +105,12 @@ def vector_search(
     params = [vector]
 
     # Fetch results
-    result = conn.execute(query, params)
+    result = await asyncio.to_thread(conn.execute, query, params)
+    fetchall_result = await asyncio.to_thread(result.fetchall)
 
     # Convert to output format
     assert result.description is not None
-    for row in result.fetchall():
+    for row in fetchall_result:
         row_dict = dict(zip([desc[0] for desc in result.description], row))
         row_dict["metadata"] = json.loads(row_dict.get("metadata") or "{}")
         row_dict["embedding"] = row_dict.get("embedding") or []
@@ -159,9 +163,9 @@ class Document(BaseModel):
     name: Text
     content: Text
     content_md5: Text
-    metadata: Dict[Text, Any] = Field(default_factory=dict)
-    created_at: int = Field(default_factory=lambda: int(time.time()))
-    updated_at: int = Field(default_factory=lambda: int(time.time()))
+    metadata: Optional[Dict[Text, Any]] = Field(default_factory=dict)
+    created_at: Optional[int] = Field(default=None)
+    updated_at: Optional[int] = Field(default=None)
 
 
 class SearchRequest(BaseModel):
@@ -235,17 +239,19 @@ async def api_search(
     if isinstance(request.query, Text):
         might_be_vector = decode_base64_to_vector(request.query)
         if might_be_vector is None:
-            vector = to_vector_with_cache(
-                request.query,
-                cache=app.state.cache,
-                openai_client=app.state.openai_client,
+            vector = (
+                await to_vector_with_cache(
+                    request.query,
+                    cache=app.state.cache,
+                    openai_client=app.state.openai_client,
+                )
             )[0]
         else:
             vector = might_be_vector
     else:
         vector = request.query
 
-    search_results = vector_search(
+    search_results = await vector_search(
         vector,
         top_k=request.top_k,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
