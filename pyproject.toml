@@ -10,6 +10,7 @@ version = "0.1.0"
 diskcache = "*"
 duckdb = ">=0.10.2"
 fastapi = { version = "^0", extras = ["standard"] }
+openai = "^1"
 pydantic = "^2"
 pydantic-settings = "*"
 python = "^3.12"
