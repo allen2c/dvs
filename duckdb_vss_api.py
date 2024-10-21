@@ -33,7 +33,7 @@ sql_stmt_vss = dedent(
 ).strip()
 
 
-async def to_vector_with_cache(
+async def to_vectors_with_cache(
     queries: Union[List[Text], Text], *, cache: Cache, openai_client: "openai.OpenAI"
 ) -> List[List[float]]:
     """"""
@@ -74,6 +74,48 @@ def decode_base64_to_vector(base64_str: Text) -> Optional[List[float]]:
         ).tolist()
     except (binascii.Error, ValueError):
         return None  # not a base64 encoded string
+
+
+async def ensure_vectors(
+    queries: Union[List[Text], Text, List[List[float]], List[Union[Text, List[float]]]],
+    *,
+    cache: Cache,
+    openai_client: "openai.OpenAI",
+) -> List[List[float]]:
+    queries = [queries] if isinstance(queries, Text) else queries
+
+    output_vectors: List[Optional[List[float]]] = [None] * len(queries)
+    required_emb_indices: List[int] = []
+    required_emb_text: List[Text] = []
+    for idx, query in enumerate(queries):
+        query = query.strip() if isinstance(query, Text) else query
+        if not query:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid queries[{idx}].",
+            )
+        if isinstance(query, Text):
+            might_be_vector = decode_base64_to_vector(query)
+            if might_be_vector is None:
+                required_emb_indices.append(idx)
+                required_emb_text.append(query)
+            else:
+                output_vectors[idx] = might_be_vector
+        else:
+            output_vectors[idx] = query
+
+    # Ensure all required embeddings are text
+    assert len(required_emb_indices) == len(required_emb_text)
+    if required_emb_indices:
+        embeddings = await to_vectors_with_cache(
+            required_emb_text, cache=cache, openai_client=openai_client
+        )
+        for idx, embedding in zip(required_emb_indices, embeddings):
+            output_vectors[idx] = embedding
+
+    # Ensure all vectors are not None
+    assert all(v is not None for v in output_vectors)
+    return output_vectors  # type: ignore
 
 
 async def vector_search(
@@ -174,6 +216,12 @@ class SearchRequest(BaseModel):
     with_embedding: bool = Field(default=False)
 
 
+class BulkSearchRequest(BaseModel):
+    queries: List[Union[Text, List[float]]]
+    top_k: int = Field(default=5)
+    with_embedding: bool = Field(default=False)
+
+
 class SearchResult(BaseModel):
     point: Point
     document: Optional[Document] = Field(default=None)
@@ -182,6 +230,11 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     results: List[SearchResult] = Field(default_factory=list)
+    elapsed_time_ms: float = Field(default=0.0)
+
+
+class BulkSearchResponse(BaseModel):
+    results: List[List[SearchResult]] = Field(default_factory=list)
     elapsed_time_ms: float = Field(default=0.0)
 
 
@@ -229,28 +282,15 @@ async def api_search(
     ),
     time_start: float = Depends(lambda: time.perf_counter()),
 ):
-    request.query = (
-        request.query.strip() if isinstance(request.query, Text) else request.query
+    # Ensure vectors
+    vectors = await ensure_vectors(
+        [request.query],
+        cache=app.state.cache,
+        openai_client=app.state.openai_client,
     )
-    if not request.query:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Query is required"
-        )
-    if isinstance(request.query, Text):
-        might_be_vector = decode_base64_to_vector(request.query)
-        if might_be_vector is None:
-            vector = (
-                await to_vector_with_cache(
-                    request.query,
-                    cache=app.state.cache,
-                    openai_client=app.state.openai_client,
-                )
-            )[0]
-        else:
-            vector = might_be_vector
-    else:
-        vector = request.query
+    vector = vectors[0]
 
+    # Search
     search_results = await vector_search(
         vector,
         top_k=request.top_k,
