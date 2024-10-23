@@ -11,7 +11,7 @@ import duckdb
 import numpy as np
 import openai
 from diskcache import Cache
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -219,9 +219,7 @@ class SearchRequest(BaseModel):
 
 
 class BulkSearchRequest(BaseModel):
-    queries: List[Union[Text, List[float]]]
-    top_k: int = Field(default=5)
-    with_embedding: bool = Field(default=False)
+    queries: List[SearchRequest]
 
 
 class SearchResult(BaseModel):
@@ -229,15 +227,53 @@ class SearchResult(BaseModel):
     document: Optional[Document] = Field(default=None)
     relevance_score: float = Field(default=0.0)
 
+    @classmethod
+    def from_search_result(
+        cls, search_result: Tuple["Point", Optional["Document"], float]
+    ) -> "SearchResult":
+        return cls.model_validate(
+            {
+                "point": search_result[0],
+                "document": search_result[1],
+                "relevance_score": search_result[2],
+            }
+        )
+
 
 class SearchResponse(BaseModel):
     results: List[SearchResult] = Field(default_factory=list)
-    elapsed_time_ms: float = Field(default=0.0)
+
+    @classmethod
+    def from_search_results(
+        cls,
+        search_results: List[Tuple["Point", Optional["Document"], float]],
+    ) -> "SearchResponse":
+        out = cls.model_validate(
+            {
+                "results": [
+                    SearchResult.from_search_result(res) for res in search_results
+                ]
+            }
+        )
+        return out
 
 
 class BulkSearchResponse(BaseModel):
-    results: List[List[SearchResult]] = Field(default_factory=list)
-    elapsed_time_ms: float = Field(default=0.0)
+    results: List[SearchResponse] = Field(default_factory=list)
+
+    @classmethod
+    def from_bulk_search_results(
+        cls,
+        bulk_search_results: List[List[Tuple["Point", Optional["Document"], float]]],
+    ) -> "BulkSearchResponse":
+        return cls.model_validate(
+            {
+                "results": [
+                    SearchResponse.from_search_results(search_results)
+                    for search_results in bulk_search_results
+                ]
+            }
+        )
 
 
 settings = Settings()
@@ -248,11 +284,11 @@ app.state.settings = app.extra["settings"] = settings
 app.state.cache = app.extra["cache"] = Cache(
     directory=settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT
 )
-with duckdb.connect(settings.DUCKDB_PATH) as conn:
-    conn.sql("INSTALL json;")
-    conn.sql("LOAD json;")
-    conn.sql("INSTALL vss;")
-    conn.sql("LOAD vss;")
+with duckdb.connect(settings.DUCKDB_PATH) as __conn__:
+    __conn__.sql("INSTALL json;")
+    __conn__.sql("LOAD json;")
+    __conn__.sql("INSTALL vss;")
+    __conn__.sql("LOAD vss;")
 if settings.OPENAI_API_KEY is None:
     app.state.openai_client = app.extra["openai_client"] = None
 else:
@@ -269,6 +305,7 @@ async def api_root():
 @app.post("/s")
 @app.post("/search")
 async def api_search(
+    response: Response,
     debug: bool = Query(default=False),
     request: SearchRequest = Body(
         ...,
@@ -309,19 +346,75 @@ async def api_search(
 
     # Return results
     time_end = time.perf_counter()
-    elapsed_time_ms = (time_end - time_start) * 1000
+    elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f}ms"
+    response.headers["X-Processing-Time"] = elapsed_time_ms_str
     if debug:
-        print(f"Elapsed time: {elapsed_time_ms:.2f} ms")
-    return SearchResponse.model_validate(
-        {
-            "results": [
-                {
-                    "point": res[0],
-                    "document": res[1],
-                    "relevance_score": res[2],
-                }
-                for res in search_results
-            ],
-            "elapsed_time_ms": elapsed_time_ms,
-        }
+        print(f"Elapsed time: {elapsed_time_ms_str}")
+    return SearchResponse.from_search_results(search_results)
+
+
+@app.post("/bs")
+@app.post("/bulk_search")
+async def api_bulk_search(
+    response: Response,
+    debug: bool = Query(default=False),
+    request: BulkSearchRequest = Body(
+        ...,
+        openapi_examples={
+            "search_request_example_1": {
+                "summary": "Bulk Search Request Example 1",
+                "value": {
+                    "queries": [
+                        {
+                            "query": "How is Apple doing?",
+                            "top_k": 2,
+                            "with_embedding": False,
+                        },
+                        {
+                            "query": "What is the game score?",
+                            "top_k": 2,
+                            "with_embedding": False,
+                        },
+                    ],
+                },
+            },
+        },
+    ),
+    time_start: float = Depends(lambda: time.perf_counter()),
+):
+    if not request.queries:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No queries provided.",
+        )
+
+    # Ensure vectors
+    vectors = await ensure_vectors(
+        [query.query for query in request.queries],
+        cache=app.state.cache,
+        openai_client=app.state.openai_client,
     )
+
+    # Search
+    bulk_search_results = await asyncio.gather(
+        *[
+            vector_search(
+                vector,
+                top_k=req_query.top_k,
+                embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
+                documents_table_name=settings.DOCUMENTS_TABLE_NAME,
+                points_table_name=settings.POINTS_TABLE_NAME,
+                conn=duckdb.connect(settings.DUCKDB_PATH),
+                with_embedding=req_query.with_embedding,
+            )
+            for vector, req_query in zip(vectors, request.queries)
+        ]
+    )
+
+    # Return results
+    time_end = time.perf_counter()
+    elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f} ms"
+    response.headers["X-Processing-Time"] = elapsed_time_ms_str
+    if debug:
+        print(f"Elapsed time: {elapsed_time_ms_str}")
+    return BulkSearchResponse.from_bulk_search_results(bulk_search_results)
