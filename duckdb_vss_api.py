@@ -59,7 +59,9 @@ async def to_vectors_with_cache(
         )
         embeddings_data = embeddings_response.data
         for idx, embedding in zip(not_cached_indices, embeddings_data):
-            await asyncio.to_thread(cache.set, queries[idx], embedding.embedding)
+            await asyncio.to_thread(
+                cache.set, queries[idx], embedding.embedding, expire=604800
+            )
             output_vectors[idx] = embedding.embedding  # type: ignore
 
     if any(v is None for v in output_vectors):
