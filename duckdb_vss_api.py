@@ -413,7 +413,7 @@ async def api_bulk_search(
 
     # Return results
     time_end = time.perf_counter()
-    elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f} ms"
+    elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f}ms"
     response.headers["X-Processing-Time"] = elapsed_time_ms_str
     if debug:
         print(f"Elapsed time: {elapsed_time_ms_str}")
