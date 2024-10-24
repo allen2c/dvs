@@ -9,6 +9,13 @@ fi
 
 FILENAME="./documents.duckdb"
 
+# Check if file already exists
+if [ -f "$FILENAME" ]; then
+    echo "File already exists: $FILENAME"
+    echo "Skipping download..."
+    exit 0
+fi
+
 echo "Downloading from: $DOWNLOAD_DB_URL"
 echo "Saving as: $FILENAME"
 
