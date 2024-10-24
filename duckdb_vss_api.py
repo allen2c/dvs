@@ -58,30 +58,6 @@ Dependencies:
 
 For detailed API documentation, refer to the OpenAPI schema available at the /docs endpoint.
 
-
-Mermaid Diagram:
-----------------
-```mermaid
-sequenceDiagram
-    participant Client
-    participant FastAPI
-    participant Cache
-    participant OpenAI
-    participant DuckDB
-
-    Client->>FastAPI: Send search request
-    FastAPI->>Cache: Check for cached embedding
-    alt Embedding in cache
-        Cache-->>FastAPI: Return cached embedding
-    else Embedding not in cache
-        FastAPI->>OpenAI: Generate embedding
-        OpenAI-->>FastAPI: Return embedding
-        FastAPI->>Cache: Store new embedding
-    end
-    FastAPI->>DuckDB: Perform vector search
-    DuckDB-->>FastAPI: Return search results
-    FastAPI->>Client: Send search response
-```
 """  # noqa: E501
 
 import asyncio

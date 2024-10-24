@@ -14,6 +14,30 @@ DuckDB-VSS-API is a FastAPI-based web service that provides efficient vector sim
 - Configurable search parameters (e.g., top-k results, embedding inclusion)
 - Integration with OpenAI's latest embedding models
 
+## Architecture
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI
+    participant Cache
+    participant OpenAI
+    participant DuckDB
+
+    Client->>FastAPI: Send search request
+    FastAPI->>Cache: Check for cached embedding
+    alt Embedding in cache
+        Cache-->>FastAPI: Return cached embedding
+    else Embedding not in cache
+        FastAPI->>OpenAI: Generate embedding
+        OpenAI-->>FastAPI: Return embedding
+        FastAPI->>Cache: Store new embedding
+    end
+    FastAPI->>DuckDB: Perform vector search
+    DuckDB-->>FastAPI: Return search results
+    FastAPI->>Client: Send search response
+```
+
 ## Installation
 
 1. Clone the repository:
