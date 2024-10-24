@@ -15,8 +15,11 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, stat
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
+# Column names
 column_names_with_embedding = ("point_id", "document_id", "content_md5", "embedding")
 column_names_without_embedding = ("point_id", "document_id", "content_md5")
+
+# SQL statement for vector search
 sql_stmt_vss = dedent(
     """
     WITH vector_search AS (
@@ -36,7 +39,52 @@ sql_stmt_vss = dedent(
 async def to_vectors_with_cache(
     queries: Union[List[Text], Text], *, cache: Cache, openai_client: "openai.OpenAI"
 ) -> List[List[float]]:
-    """"""
+    """
+    Convert input queries to vector embeddings using OpenAI's API, with caching.
+
+    This function takes a list of text queries or a single text query and converts them
+    into vector embeddings. It uses a cache to store and retrieve previously computed
+    embeddings, reducing API calls and improving performance for repeated queries.
+
+    Parameters
+    ----------
+    queries : Union[List[Text], Text]
+        A single text query or a list of text queries to be converted into vector embeddings.
+    cache : Cache
+        A diskcache.Cache object used for storing and retrieving cached embeddings.
+    openai_client : openai.OpenAI
+        An initialized OpenAI client object for making API calls.
+
+    Returns
+    -------
+    List[List[float]]
+        A list of vector embeddings, where each embedding is a list of floats.
+
+    Raises
+    ------
+    ValueError
+        If the function fails to get embeddings for all queries.
+
+    Notes
+    -----
+    - The function first checks the cache for each query. If found, it uses the cached embedding.
+    - For queries not in the cache, it batches them and sends a single request to the OpenAI API.
+    - New embeddings are cached with an expiration time of 7 days (604800 seconds).
+    - The embedding model and dimensions are determined by the global `settings` object.
+
+    Example
+    -------
+    >>> cache = Cache("./embeddings.cache")
+    >>> openai_client = openai.OpenAI(api_key="your-api-key")
+    >>> queries = ["How does AI work?", "What is machine learning?"]
+    >>> embeddings = await to_vectors_with_cache(queries, cache=cache, openai_client=openai_client)
+    >>> print(len(embeddings), len(embeddings[0]))
+    2 512
+
+    See Also
+    --------
+    ensure_vectors : A higher-level function that handles various input types and uses this function.
+    """  # noqa: E501
 
     queries = [queries] if isinstance(queries, Text) else queries
     output_vectors: List[Optional[List[float]]] = [None] * len(queries)
@@ -70,6 +118,52 @@ async def to_vectors_with_cache(
 
 
 def decode_base64_to_vector(base64_str: Text) -> Optional[List[float]]:
+    """
+    Decode a base64 encoded string to a vector of floats.
+
+    This function attempts to decode a base64 encoded string into a vector of
+    float values. It's particularly useful for converting encoded embeddings
+    back into their original numerical representation.
+
+    Parameters
+    ----------
+    base64_str : Text
+        A string containing the base64 encoded vector data.
+
+    Returns
+    -------
+    Optional[List[float]]
+        If decoding is successful, returns a list of float values representing
+        the vector. If decoding fails, returns None.
+
+    Notes
+    -----
+    The function uses numpy to interpret the decoded bytes as a float32 array
+    before converting it to a Python list. This approach is efficient for
+    handling large vectors.
+
+    The function is designed to gracefully handle decoding errors, returning
+    None instead of raising an exception if the input is not a valid base64
+    encoded string or cannot be interpreted as a float32 array.
+
+    Examples
+    --------
+    >>> encoded = "AAAAAAAAAEA/AABAQAAAQUA="
+    >>> result = decode_base64_to_vector(encoded)
+    >>> print(result)
+    [0.0, 0.5, 1.0, 1.5]
+
+    >>> invalid = "Not a base64 string"
+    >>> result = decode_base64_to_vector(invalid)
+    >>> print(result)
+    None
+
+    See Also
+    --------
+    base64.b64decode : For decoding base64 strings.
+    numpy.frombuffer : For creating numpy arrays from buffer objects.
+    """  # noqa: E501
+
     try:
         return np.frombuffer(  # type: ignore[no-untyped-call]
             base64.b64decode(base64_str), dtype="float32"
@@ -130,6 +224,65 @@ async def vector_search(
     conn: "duckdb.DuckDBPyConnection",
     with_embedding: bool = True,
 ) -> List[Tuple["Point", Optional["Document"], float]]:
+    """
+    Perform a vector similarity search in a DuckDB database.
+
+    This function executes a vector similarity search using the provided embedding vector
+    against the points stored in the specified DuckDB table. It returns the top-k most
+    similar points along with their associated documents and relevance scores.
+
+    Parameters
+    ----------
+    vector : List[float]
+        The query vector to search for similar points.
+    top_k : int
+        The number of most similar points to return.
+    embedding_dimensions : int
+        The dimensionality of the embedding vectors.
+    documents_table_name : Text
+        The name of the table containing document information.
+    points_table_name : Text
+        The name of the table containing point information and embeddings.
+    conn : duckdb.DuckDBPyConnection
+        An active connection to the DuckDB database.
+    with_embedding : bool, optional
+        Whether to include the embedding vector in the results (default is True).
+
+    Returns
+    -------
+    List[Tuple["Point", Optional["Document"], float]]
+        A list of tuples, each containing:
+        - Point: The matched point information.
+        - Document: The associated document information (if available).
+        - float: The relevance score (cosine similarity) between the query vector and the point.
+
+    Notes
+    -----
+    - The function uses array_cosine_similarity for calculating the similarity between vectors.
+    - Results are ordered by descending relevance score.
+    - The SQL query joins the points table with the documents table to retrieve associated document information.
+
+    Examples
+    --------
+    >>> conn = duckdb.connect('my_database.duckdb')
+    >>> query_vector = [0.1, 0.2, 0.3, ..., 0.5]  # 512-dimensional vector
+    >>> results = await vector_search(
+    ...     query_vector,
+    ...     top_k=5,
+    ...     embedding_dimensions=512,
+    ...     documents_table_name='documents',
+    ...     points_table_name='points',
+    ...     conn=conn
+    ... )
+    >>> for point, document, score in results:
+    ...     print(f"Point ID: {point.point_id}, Score: {score}, Document: {document.name}")
+
+    See Also
+    --------
+    ensure_vectors : Function to prepare input vectors for search.
+    api_search : API endpoint that utilizes this vector search function.
+    """  # noqa: E501
+
     output: List[Tuple["Point", Optional["Document"], float]] = []
 
     column_names_expr = ", ".join(
@@ -170,25 +323,69 @@ async def vector_search(
 
 
 class Settings(BaseSettings):
-    APP_NAME: Text = Field(default="duckdb-vss-api")
-    APP_VERSION: Text = Field(default="0.1.0")
-    APP_ENV: Literal["development", "production", "test"] = Field(default="development")
+    """
+    Settings for the DuckDB VSS API.
+
+    This class defines the configuration parameters for the DuckDB Vector Similarity Search (VSS) API.
+    It uses Pydantic's BaseSettings for easy environment variable loading and validation.
+    """  # noqa: E501
+
+    APP_NAME: Text = Field(
+        default="duckdb-vss-api",
+        description="The name of the application. Used for identification and logging purposes.",  # noqa: E501
+    )
+    APP_VERSION: Text = Field(
+        default="0.1.0",
+        description="The version of the application. Follows semantic versioning.",
+    )
+    APP_ENV: Literal["development", "production", "test"] = Field(
+        default="development",
+        description="The environment in which the application is running. Affects logging and behavior.",  # noqa: E501
+    )
 
     # DuckDB
-    DUCKDB_PATH: Text = Field(default="./documents.duckdb")
-    POINTS_TABLE_NAME: Text = Field(default="points")
-    DOCUMENTS_TABLE_NAME: Text = Field(default="documents")
-    EMBEDDING_MODEL: Text = Field(default="text-embedding-3-small")
-    EMBEDDING_DIMENSIONS: int = Field(default=512)
+    DUCKDB_PATH: Text = Field(
+        default="./documents.duckdb",
+        description="The file path to the DuckDB database file containing document and embedding data.",  # noqa: E501
+    )
+    POINTS_TABLE_NAME: Text = Field(
+        default="points",
+        description="The name of the table in DuckDB that stores the vector embeddings and related point data.",  # noqa: E501
+    )
+    DOCUMENTS_TABLE_NAME: Text = Field(
+        default="documents",
+        description="The name of the table in DuckDB that stores the document metadata.",  # noqa: E501
+    )
+    EMBEDDING_MODEL: Text = Field(
+        default="text-embedding-3-small",
+        description="The name of the OpenAI embedding model to use for generating vector embeddings.",  # noqa: E501
+    )
+    EMBEDDING_DIMENSIONS: int = Field(
+        default=512,
+        description="The number of dimensions in the vector embeddings generated by the chosen model.",  # noqa: E501
+    )
 
     # OpenAI
-    OPENAI_API_KEY: Optional[Text] = None
+    OPENAI_API_KEY: Optional[Text] = Field(
+        default=None,
+        description="The API key for authenticating with OpenAI services. If not provided, OpenAI features will be disabled.",  # noqa: E501
+    )
 
     # Embeddings
-    CACHE_PATH: Text = Field(default="./embeddings.cache")
-    CACHE_SIZE_LIMIT: int = Field(default=100 * 2**20)  # 100MB
+    CACHE_PATH: Text = Field(
+        default="./embeddings.cache",
+        description="The file path to the cache directory for storing computed embeddings.",  # noqa: E501
+    )
+    CACHE_SIZE_LIMIT: int = Field(
+        default=100 * 2**20,
+        description="The maximum size of the embeddings cache in bytes. Default is 100MB.",  # noqa: E501
+    )
 
     def validate_variables(self):
+        """
+        Validate the variables in the settings.
+        """
+
         if not pathlib.Path(self.DUCKDB_PATH).exists():
             raise ValueError(f"Database file does not exist: {self.DUCKDB_PATH}")
         else:
