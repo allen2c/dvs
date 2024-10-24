@@ -1,3 +1,89 @@
+"""
+DuckDB Vector Similarity Search (VSS) API
+
+This module implements a FastAPI-based web service for performing vector similarity searches
+using DuckDB as the backend database and OpenAI's embedding models for vector representation.
+
+The API provides endpoints for single and bulk vector similarity searches, allowing users to
+find similar documents or data points based on text queries or pre-computed vector embeddings.
+
+Key Components:
+---------------
+1. FastAPI Application: Handles HTTP requests and responses.
+2. DuckDB Integration: Utilizes DuckDB for efficient storage and querying of vector data.
+3. OpenAI Embedding: Converts text queries into vector embeddings using OpenAI's models.
+4. Caching: Implements a disk-based cache to store and retrieve computed embeddings.
+5. Vector Search: Performs cosine similarity-based searches on the vector database.
+
+Main Endpoints:
+---------------
+- GET /: Root endpoint providing API status and information.
+- POST /search or /s: Perform a single vector similarity search.
+- POST /bulk_search or /bs: Perform multiple vector similarity searches in one request.
+
+Configuration:
+--------------
+The API behavior is controlled by environment variables and the `Settings` class,
+which includes database paths, table names, embedding model details, and cache settings.
+
+Data Models:
+------------
+- Point: Represents a point in the vector space.
+- Document: Contains metadata and content information for documents.
+- SearchRequest: Defines parameters for a single search request.
+- BulkSearchRequest: Represents multiple search requests in a single call.
+- SearchResult: Contains the result of a single vector similarity search.
+- SearchResponse: Wraps multiple SearchResults for API responses.
+
+Usage Flow:
+-----------
+1. Client sends a search request (text or vector) to the API.
+2. API converts text to vector embedding if necessary (using OpenAI API).
+3. Vector search is performed on the DuckDB database.
+4. Results are processed and returned to the client.
+
+Performance Considerations:
+---------------------------
+- Caching of embeddings reduces API calls and improves response times.
+- Bulk search endpoint allows for efficient processing of multiple queries.
+- DuckDB's columnar storage and vector operations ensure fast similarity computations.
+
+Dependencies:
+-------------
+- FastAPI: Web framework for building APIs.
+- DuckDB: Embeddable SQL OLAP database management system.
+- OpenAI: For generating text embeddings.
+- Pydantic: Data validation and settings management.
+- NumPy: For numerical operations on vectors.
+
+For detailed API documentation, refer to the OpenAPI schema available at the /docs endpoint.
+
+
+Mermaid Diagram:
+----------------
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI
+    participant Cache
+    participant OpenAI
+    participant DuckDB
+
+    Client->>FastAPI: Send search request
+    FastAPI->>Cache: Check for cached embedding
+    alt Embedding in cache
+        Cache-->>FastAPI: Return cached embedding
+    else Embedding not in cache
+        FastAPI->>OpenAI: Generate embedding
+        OpenAI-->>FastAPI: Return embedding
+        FastAPI->>Cache: Store new embedding
+    end
+    FastAPI->>DuckDB: Perform vector search
+    DuckDB-->>FastAPI: Return search results
+    FastAPI->>Client: Send search response
+```
+"""  # noqa: E501
+
 import asyncio
 import base64
 import binascii
@@ -812,7 +898,38 @@ class BulkSearchResponse(BaseModel):
 settings = Settings()
 
 # FastAPI app
-app = FastAPI()
+app = FastAPI(
+    debug=False if settings.APP_ENV == "production" else True,
+    title=settings.APP_NAME,
+    summary="A high-performance vector similarity search API powered by DuckDB and OpenAI embeddings",  # noqa: E501
+    description=dedent(
+        """
+        The DuckDB Vector Similarity Search (VSS) API provides a fast and efficient way to perform
+        vector similarity searches on large datasets. It leverages DuckDB for data storage and
+        querying, and OpenAI's embedding models for vector representation of text data.
+
+        Key Features:
+        - Single and bulk vector similarity searches
+        - Caching of embeddings for improved performance
+        - Support for both text queries and pre-computed vector embeddings
+        - Configurable search parameters (e.g., top-k results, embedding inclusion)
+        - Integration with OpenAI's latest embedding models
+
+        This API is designed for applications requiring fast similarity search capabilities,
+        such as recommendation systems, semantic search engines, and content discovery platforms.
+        """  # noqa: E501
+    ).strip(),
+    version=settings.APP_VERSION,
+    contact={
+        "name": "DuckDB VSS API",
+        "url": "https://github.com/ChouYuJung/duckdb-vss-api",
+        "email": "f1470891079@gmail.com",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+)
 # FastAPI app state
 app.state.settings = app.extra["settings"] = settings
 app.state.cache = app.extra["cache"] = Cache(
@@ -836,7 +953,7 @@ with duckdb.connect(settings.DUCKDB_PATH) as __conn__:
 
 # API endpoints
 @app.get("/", description="Root endpoint providing API status and basic information")
-async def api_root():
+async def api_root() -> Dict[Text, Text]:
     """
     Root endpoint for the DuckDB Vector Similarity Search (VSS) API.
 
@@ -921,7 +1038,7 @@ async def api_search(
         lambda: duckdb.connect(settings.DUCKDB_PATH),
     ),
     time_start: float = Depends(lambda: time.perf_counter()),
-):
+) -> SearchResponse:
     """
     Perform a vector similarity search on the database.
 
@@ -1045,7 +1162,7 @@ async def api_bulk_search(
         },
     ),
     time_start: float = Depends(lambda: time.perf_counter()),
-):
+) -> BulkSearchResponse:
     """
     Perform multiple vector similarity searches on the database in a single request.
 
