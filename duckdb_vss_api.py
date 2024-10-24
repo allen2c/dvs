@@ -393,41 +393,244 @@ class Settings(BaseSettings):
 
 
 class Point(BaseModel):
-    point_id: Text
-    document_id: Text
-    content_md5: Text
-    embedding: List[float]
+    """
+    Represents a point in the vector space, associated with a document.
+
+    This class encapsulates the essential information about a point in the vector space,
+    including its unique identifier, the document it belongs to, a content hash, and its
+    vector embedding.
+
+    Attributes:
+        point_id (Text): A unique identifier for the point in the vector space.
+        document_id (Text): The identifier of the document this point is associated with.
+        content_md5 (Text): An MD5 hash of the content, used for quick comparisons and integrity checks.
+        embedding (List[float]): The vector embedding representation of the point in the vector space.
+
+    The Point class is crucial for vector similarity search operations, as it contains
+    the embedding that is used for comparison with query vectors.
+    """  # noqa: E501
+
+    point_id: Text = Field(
+        ...,
+        description="Unique identifier for the point in the vector space.",
+    )
+    document_id: Text = Field(
+        ...,
+        description="Identifier of the associated document.",
+    )
+    content_md5: Text = Field(
+        ...,
+        description="MD5 hash of the content for quick comparison and integrity checks.",  # noqa: E501
+    )
+    embedding: List[float] = Field(
+        ...,
+        description="Vector embedding representation of the point.",
+    )
 
 
 class Document(BaseModel):
-    document_id: Text
-    name: Text
-    content: Text
-    content_md5: Text
-    metadata: Optional[Dict[Text, Any]] = Field(default_factory=dict)
-    created_at: Optional[int] = Field(default=None)
-    updated_at: Optional[int] = Field(default=None)
+    """
+    Represents a document in the system, containing metadata and content information.
+
+    This class encapsulates all the relevant information about a document, including
+    its unique identifier, name, content, and various metadata fields. It is designed
+    to work in conjunction with the Point class for vector similarity search operations.
+
+    Attributes:
+        document_id (Text): A unique identifier for the document.
+        name (Text): The name or title of the document.
+        content (Text): The full text content of the document.
+        content_md5 (Text): An MD5 hash of the content for integrity checks.
+        metadata (Optional[Dict[Text, Any]]): Additional metadata associated with the document.
+        created_at (Optional[int]): Unix timestamp of when the document was created.
+        updated_at (Optional[int]): Unix timestamp of when the document was last updated.
+
+    The Document class is essential for storing and retrieving document information
+    in the vector similarity search system. It provides a structured way to manage
+    document data and metadata, which can be used in conjunction with vector embeddings
+    for advanced search and retrieval operations.
+    """  # noqa: E501
+
+    document_id: Text = Field(
+        ...,
+        description="Unique identifier for the document.",
+    )
+    name: Text = Field(
+        ...,
+        description="Name or title of the document.",
+    )
+    content: Text = Field(
+        ...,
+        description="Full text content of the document.",
+    )
+    content_md5: Text = Field(
+        ...,
+        description="MD5 hash of the content for integrity checks.",
+    )
+    metadata: Optional[Dict[Text, Any]] = Field(
+        default_factory=dict,
+        description="Additional metadata associated with the document.",
+    )
+    created_at: Optional[int] = Field(
+        default=None,
+        description="Unix timestamp of document creation.",
+    )
+    updated_at: Optional[int] = Field(
+        default=None,
+        description="Unix timestamp of last document update.",
+    )
 
 
 class SearchRequest(BaseModel):
-    query: Text | List[float]
-    top_k: int = Field(default=5)
-    with_embedding: bool = Field(default=False)
+    """
+    Represents a single search request for vector similarity search.
+
+    This class encapsulates the parameters needed to perform a vector similarity search
+    in the DuckDB VSS API. It allows users to specify the query, the number of results
+    to return, and whether to include the embedding in the results.
+
+    Attributes:
+        query (Union[Text, List[float]]): The search query, which can be either a text string
+            or a pre-computed vector embedding as a list of floats. If a text string is provided,
+            it will be converted to a vector embedding using the configured embedding model.
+        top_k (int): The maximum number of results to return. Defaults to 5.
+        with_embedding (bool): Whether to include the embedding vector in the search results.
+            Defaults to False to reduce response size.
+
+    Example:
+        >>> request = SearchRequest(query="How does AI work?", top_k=10, with_embedding=True)
+        >>> print(request)
+        SearchRequest(query='How does AI work?', top_k=10, with_embedding=True)
+
+    Note:
+        When `query` is a list of floats, it's assumed to be a pre-computed embedding vector.
+        This can be useful for clients that want to perform their own embedding computation
+        or for testing purposes.
+    """  # noqa: E501
+
+    query: Union[Text, List[float]] = Field(
+        ...,
+        description="The search query as text or a pre-computed vector embedding.",
+    )
+    top_k: int = Field(
+        default=5,
+        description="The maximum number of results to return.",
+    )
+    with_embedding: bool = Field(
+        default=False,
+        description="Whether to include the embedding in the result.",
+    )
 
 
 class BulkSearchRequest(BaseModel):
-    queries: List[SearchRequest]
+    """
+    Represents a bulk search request for multiple vector similarity searches.
+
+    This class allows users to submit multiple search queries in a single API call,
+    which can be more efficient than making separate requests for each query.
+
+    Attributes:
+        queries (List[SearchRequest]): A list of SearchRequest objects, each representing
+            an individual search query with its own parameters.
+
+    Example:
+        >>> bulk_request = BulkSearchRequest(queries=[
+        ...     SearchRequest(query="How does AI work?", top_k=5),
+        ...     SearchRequest(query="What is machine learning?", top_k=3, with_embedding=True)
+        ... ])
+        >>> print(bulk_request)
+        BulkSearchRequest(queries=[SearchRequest(query='How does AI work?', top_k=5, with_embedding=False), SearchRequest(query='What is machine learning?', top_k=3, with_embedding=True)])
+
+    Note:
+        The bulk search functionality allows for efficient processing of multiple queries
+        in parallel, which can significantly reduce overall response time compared to
+        sequential individual requests.
+    """  # noqa: E501
+
+    queries: List[SearchRequest] = Field(
+        ...,
+        description="A list of search requests to be processed in bulk.",
+    )
 
 
 class SearchResult(BaseModel):
-    point: Point
-    document: Optional[Document] = Field(default=None)
-    relevance_score: float = Field(default=0.0)
+    """
+    Represents a single result from a vector similarity search operation.
+
+    This class encapsulates the information returned for each matching item
+    in a vector similarity search, including the matched point, its associated
+    document (if any), and the relevance score indicating how closely it matches
+    the query.
+
+    Attributes
+    ----------
+    point : Point
+        The matched point in the vector space, containing embedding and metadata.
+    document : Optional[Document]
+        The associated document for the matched point, if available.
+    relevance_score : float
+        A score indicating the similarity between the query and the matched point,
+        typically ranging from 0 to 1, where 1 indicates a perfect match.
+
+    Methods
+    -------
+    from_search_result(search_result: Tuple[Point, Optional[Document], float]) -> SearchResult
+        Class method to create a SearchResult instance from a tuple of search results.
+
+    Notes
+    -----
+    The relevance score is typically calculated using cosine similarity between
+    the query vector and the point's embedding vector.
+
+    Examples
+    --------
+    >>> point = Point(point_id="1", document_id="doc1", content_md5="abc123", embedding=[0.1, 0.2, 0.3])
+    >>> document = Document(document_id="doc1", name="Example Doc", content="Sample content")
+    >>> result = SearchResult(point=point, document=document, relevance_score=0.95)
+    >>> print(result.relevance_score)
+    0.95
+    """  # noqa: E501
+
+    point: Point = Field(
+        ...,
+        description="The matched point in the vector space.",
+    )
+    document: Optional[Document] = Field(
+        default=None,
+        description="The associated document for the matched point, if available.",
+    )
+    relevance_score: float = Field(
+        default=0.0,
+        description="The similarity score between the query and the matched point.",
+    )
 
     @classmethod
     def from_search_result(
         cls, search_result: Tuple["Point", Optional["Document"], float]
     ) -> "SearchResult":
+        """
+        Create a SearchResult instance from a tuple of search results.
+
+        Parameters
+        ----------
+        search_result : Tuple[Point, Optional[Document], float]
+            A tuple containing the point, document, and relevance score.
+
+        Returns
+        -------
+        SearchResult
+            An instance of SearchResult created from the input tuple.
+
+        Examples
+        --------
+        >>> point = Point(point_id="1", document_id="doc1", content_md5="abc123", embedding=[0.1, 0.2, 0.3])
+        >>> document = Document(document_id="doc1", name="Example Doc", content="Sample content")
+        >>> result_tuple = (point, document, 0.95)
+        >>> search_result = SearchResult.from_search_result(result_tuple)
+        >>> print(search_result.relevance_score)
+        0.95
+        """  # noqa: E501
+
         return cls.model_validate(
             {
                 "point": search_result[0],
@@ -438,31 +641,163 @@ class SearchResult(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    results: List[SearchResult] = Field(default_factory=list)
+    """
+    Represents the response to a single vector similarity search query.
+
+    This class encapsulates a list of SearchResult objects, providing a
+    structured way to return multiple matching results for a given query.
+
+    Attributes
+    ----------
+    results : List[SearchResult]
+        A list of SearchResult objects, each representing a matched item
+        from the vector similarity search.
+
+    Methods
+    -------
+    from_search_results(search_results: List[Tuple[Point, Optional[Document], float]]) -> SearchResponse
+        Class method to create a SearchResponse instance from a list of search result tuples.
+
+    Notes
+    -----
+    The results are typically ordered by relevance score in descending order,
+    with the most similar matches appearing first in the list.
+
+    Examples
+    --------
+    >>> point1 = Point(point_id="1", document_id="doc1", content_md5="abc123", embedding=[0.1, 0.2, 0.3])
+    >>> document1 = Document(document_id="doc1", name="Doc 1", content="Content 1")
+    >>> result1 = SearchResult(point=point1, document=document1, relevance_score=0.95)
+    >>> point2 = Point(point_id="2", document_id="doc2", content_md5="def456", embedding=[0.4, 0.5, 0.6])
+    >>> document2 = Document(document_id="doc2", name="Doc 2", content="Content 2")
+    >>> result2 = SearchResult(point=point2, document=document2, relevance_score=0.85)
+    >>> response = SearchResponse(results=[result1, result2])
+    >>> print(len(response.results))
+    2
+    """  # noqa: E501
+
+    results: List[SearchResult] = Field(
+        default_factory=list,
+        description="A list of search results from the vector similarity search.",
+    )
 
     @classmethod
     def from_search_results(
         cls,
         search_results: List[Tuple["Point", Optional["Document"], float]],
     ) -> "SearchResponse":
-        out = cls.model_validate(
+        """
+        Create a SearchResponse instance from a list of search result tuples.
+
+        Parameters
+        ----------
+        search_results : List[Tuple[Point, Optional[Document], float]]
+            A list of tuples, each containing a point, an optional document,
+            and a relevance score.
+
+        Returns
+        -------
+        SearchResponse
+            An instance of SearchResponse created from the input list of tuples.
+
+        Examples
+        --------
+        >>> point1 = Point(point_id="1", document_id="doc1", content_md5="abc123", embedding=[0.1, 0.2, 0.3])
+        >>> document1 = Document(document_id="doc1", name="Doc 1", content="Content 1")
+        >>> result1 = (point1, document1, 0.95)
+        >>> point2 = Point(point_id="2", document_id="doc2", content_md5="def456", embedding=[0.4, 0.5, 0.6])
+        >>> document2 = Document(document_id="doc2", name="Doc 2", content="Content 2")
+        >>> result2 = (point2, document2, 0.85)
+        >>> response = SearchResponse.from_search_results([result1, result2])
+        >>> print(len(response.results))
+        2
+        """  # noqa: E501
+
+        return cls.model_validate(
             {
                 "results": [
                     SearchResult.from_search_result(res) for res in search_results
                 ]
             }
         )
-        return out
 
 
 class BulkSearchResponse(BaseModel):
-    results: List[SearchResponse] = Field(default_factory=list)
+    """
+    Represents the response to a bulk vector similarity search operation.
+
+    This class encapsulates a list of SearchResponse objects, each corresponding
+    to a single query in a bulk search request. It provides a structured way to
+    return results for multiple queries in a single response.
+
+    Attributes
+    ----------
+    results : List[SearchResponse]
+        A list of SearchResponse objects, each containing the results for
+        a single query in the bulk search operation.
+
+    Methods
+    -------
+    from_bulk_search_results(bulk_search_results: List[List[Tuple[Point, Optional[Document], float]]]) -> BulkSearchResponse
+        Class method to create a BulkSearchResponse instance from a list of bulk search result tuples.
+
+    Notes
+    -----
+    The order of SearchResponse objects in the results list corresponds to
+    the order of queries in the original bulk search request.
+
+    Examples
+    --------
+    >>> point1 = Point(point_id="1", document_id="doc1", content_md5="abc123", embedding=[0.1, 0.2, 0.3])
+    >>> document1 = Document(document_id="doc1", name="Doc 1", content="Content 1")
+    >>> result1 = SearchResult(point=point1, document=document1, relevance_score=0.95)
+    >>> response1 = SearchResponse(results=[result1])
+    >>> point2 = Point(point_id="2", document_id="doc2", content_md5="def456", embedding=[0.4, 0.5, 0.6])
+    >>> document2 = Document(document_id="doc2", name="Doc 2", content="Content 2")
+    >>> result2 = SearchResult(point=point2, document=document2, relevance_score=0.85)
+    >>> response2 = SearchResponse(results=[result2])
+    >>> bulk_response = BulkSearchResponse(results=[response1, response2])
+    >>> print(len(bulk_response.results))
+    2
+    """  # noqa: E501
+
+    results: List[SearchResponse] = Field(
+        default_factory=list,
+        description="A list of search responses, each corresponding to a query in the bulk search.",  # noqa: E501
+    )
 
     @classmethod
     def from_bulk_search_results(
         cls,
         bulk_search_results: List[List[Tuple["Point", Optional["Document"], float]]],
     ) -> "BulkSearchResponse":
+        """
+        Create a BulkSearchResponse instance from a list of bulk search result tuples.
+
+        Parameters
+        ----------
+        bulk_search_results : List[List[Tuple[Point, Optional[Document], float]]]
+            A list of lists, where each inner list contains tuples of search results
+            for a single query in the bulk search operation.
+
+        Returns
+        -------
+        BulkSearchResponse
+            An instance of BulkSearchResponse created from the input list of bulk search results.
+
+        Examples
+        --------
+        >>> point1 = Point(point_id="1", document_id="doc1", content_md5="abc123", embedding=[0.1, 0.2, 0.3])
+        >>> document1 = Document(document_id="doc1", name="Doc 1", content="Content 1")
+        >>> result1 = [(point1, document1, 0.95)]
+        >>> point2 = Point(point_id="2", document_id="doc2", content_md5="def456", embedding=[0.4, 0.5, 0.6])
+        >>> document2 = Document(document_id="doc2", name="Doc 2", content="Content 2")
+        >>> result2 = [(point2, document2, 0.85)]
+        >>> bulk_response = BulkSearchResponse.from_bulk_search_results([result1, result2])
+        >>> print(len(bulk_response.results))
+        2
+        """  # noqa: E501
+
         return cls.model_validate(
             {
                 "results": [
