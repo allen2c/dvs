@@ -808,19 +808,17 @@ class BulkSearchResponse(BaseModel):
         )
 
 
+# Settings
 settings = Settings()
 
-
+# FastAPI app
 app = FastAPI()
+# FastAPI app state
 app.state.settings = app.extra["settings"] = settings
 app.state.cache = app.extra["cache"] = Cache(
     directory=settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT
 )
-with duckdb.connect(settings.DUCKDB_PATH) as __conn__:
-    __conn__.sql("INSTALL json;")
-    __conn__.sql("LOAD json;")
-    __conn__.sql("INSTALL vss;")
-    __conn__.sql("LOAD vss;")
+# OpenAI client
 if settings.OPENAI_API_KEY is None:
     app.state.openai_client = app.extra["openai_client"] = None
 else:
@@ -828,19 +826,78 @@ else:
         api_key=settings.OPENAI_API_KEY
     )
 
+# DuckDB connection
+with duckdb.connect(settings.DUCKDB_PATH) as __conn__:
+    __conn__.sql("INSTALL json;")
+    __conn__.sql("LOAD json;")
+    __conn__.sql("INSTALL vss;")
+    __conn__.sql("LOAD vss;")
 
-@app.get("/")
+
+# API endpoints
+@app.get("/", description="Root endpoint providing API status and basic information")
 async def api_root():
-    return {"status": "ok"}
+    """
+    Root endpoint for the DuckDB Vector Similarity Search (VSS) API.
+
+    This endpoint serves as the entry point for the API, providing basic
+    information about the API's status and version. It can be used for
+    health checks, API discovery, or as a starting point for API exploration.
+
+    Returns
+    -------
+    dict
+        A dictionary containing status information and API details.
+        {
+            "status": str
+                The current status of the API (e.g., "ok").
+            "version": str
+                The version number of the API.
+            "name": str
+                The name of the API service.
+            "description": str
+                A brief description of the API's purpose.
+        }
+
+    Notes
+    -----
+    This endpoint is useful for:
+    - Verifying that the API is up and running
+    - Checking the current version of the API
+    - Getting a quick overview of the API's purpose
+
+    The response is intentionally lightweight to ensure fast response times,
+    making it suitable for frequent health checks or monitoring.
+
+    Examples
+    --------
+    >>> import httpx
+    >>> response = httpx.get("http://api-url/")
+    >>> print(response.json())
+    {
+        "status": "ok",
+        "version": "0.1.0",
+        "name": "DuckDB VSS API",
+        "description": "Vector Similarity Search API powered by DuckDB"
+    }
+    """
+
+    return {
+        "status": "ok",
+        "version": settings.APP_VERSION,
+        "name": settings.APP_NAME,
+        "description": "Vector Similarity Search API powered by DuckDB",
+    }
 
 
-@app.post("/s")
-@app.post("/search")
+@app.post("/s", description="Abbreviation for /search")
+@app.post("/search", description="Perform a vector similarity search on the database")
 async def api_search(
     response: Response,
     debug: bool = Query(default=False),
     request: SearchRequest = Body(
         ...,
+        description="The search request containing the query and search parameters",
         openapi_examples={
             "search_request_example_1": {
                 "summary": "Search Request Example 1",
@@ -853,7 +910,7 @@ async def api_search(
             "search_request_example_2": {
                 "summary": "Search Request Example 2: Base64",
                 "value": {
-                    "query": "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",  # noqa: E501
+                    "query": "",
                     "top_k": 5,
                     "with_embedding": False,
                 },
@@ -861,10 +918,75 @@ async def api_search(
         },
     ),
     conn: duckdb.DuckDBPyConnection = Depends(
-        lambda: duckdb.connect(settings.DUCKDB_PATH)
+        lambda: duckdb.connect(settings.DUCKDB_PATH),
     ),
     time_start: float = Depends(lambda: time.perf_counter()),
 ):
+    """
+    Perform a vector similarity search on the database.
+
+    This endpoint processes a single search request, converting the input query
+    into a vector embedding (if necessary) and performing a similarity search
+    against the vector database.
+
+    Parameters
+    ----------
+    response : Response
+        The FastAPI response object, used to set custom headers.
+    debug : bool, optional
+        If True, prints debug information such as elapsed time (default is False).
+    request : SearchRequest
+        The search request object containing the query and search parameters.
+    conn : duckdb.DuckDBPyConnection
+        A connection to the DuckDB database.
+    time_start : float
+        The start time of the request processing, used for performance measurement.
+
+    Returns
+    -------
+    SearchResponse
+        An object containing the search results, including matched points,
+        associated documents, and relevance scores.
+
+    Raises
+    ------
+    HTTPException
+        If there's an error processing the request or performing the search.
+
+    Notes
+    -----
+    - The function first ensures that the input query is converted to a vector embedding.
+    - It then performs a vector similarity search using the DuckDB database.
+    - The search results are ordered by relevance (cosine similarity).
+    - Performance metrics are added to the response headers.
+
+    Examples
+    --------
+    >>> import httpx
+    >>> response = httpx.post("http://api-url/search", json={
+    ...     "query": "How does AI work?",
+    ...     "top_k": 5,
+    ...     "with_embedding": False
+    ... })
+    >>> print(response.json())
+    {
+        "results": [
+            {
+                "point": {...},
+                "document": {...},
+                "relevance_score": 0.95
+            },
+            ...
+        ]
+    }
+
+    See Also
+    --------
+    SearchRequest : The model defining the structure of the search request.
+    SearchResponse : The model defining the structure of the search response.
+    vector_search : The underlying function performing the vector similarity search.
+    """  # noqa: E501
+
     # Ensure vectors
     vectors = await ensure_vectors(
         [request.query],
@@ -888,18 +1010,20 @@ async def api_search(
     time_end = time.perf_counter()
     elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f}ms"
     response.headers["X-Processing-Time"] = elapsed_time_ms_str
-    if debug:
-        print(f"Elapsed time: {elapsed_time_ms_str}")
     return SearchResponse.from_search_results(search_results)
 
 
-@app.post("/bs")
-@app.post("/bulk_search")
+@app.post("/bs", description="Abbreviation for /bulk_search")
+@app.post(
+    "/bulk_search",
+    description="Perform multiple vector similarity searches in a single request",
+)
 async def api_bulk_search(
     response: Response,
     debug: bool = Query(default=False),
     request: BulkSearchRequest = Body(
         ...,
+        description="The bulk search request containing multiple queries and search parameters",  # noqa: E501
         openapi_examples={
             "search_request_example_1": {
                 "summary": "Bulk Search Request Example 1",
@@ -922,6 +1046,83 @@ async def api_bulk_search(
     ),
     time_start: float = Depends(lambda: time.perf_counter()),
 ):
+    """
+    Perform multiple vector similarity searches on the database in a single request.
+
+    This endpoint processes a bulk search request, converting multiple input queries
+    into vector embeddings (if necessary) and performing parallel similarity searches
+    against the vector database.
+
+    Parameters
+    ----------
+    response : Response
+        The FastAPI response object, used to set custom headers.
+    debug : bool, optional
+        If True, prints debug information such as elapsed time (default is False).
+    request : BulkSearchRequest
+        The bulk search request object containing multiple queries and search parameters.
+    time_start : float
+        The start time of the request processing, used for performance measurement.
+
+    Returns
+    -------
+    BulkSearchResponse
+        An object containing the search results for all queries, including matched points,
+        associated documents, and relevance scores for each query.
+
+    Raises
+    ------
+    HTTPException
+        If there's an error processing the request, such as no queries provided.
+
+    Notes
+    -----
+    - The function first ensures that all input queries are converted to vector embeddings.
+    - It then performs parallel vector similarity searches using the DuckDB database.
+    - The search results for each query are ordered by relevance (cosine similarity).
+    - Performance metrics are added to the response headers.
+    - This bulk search is more efficient than making multiple individual search requests.
+
+    Examples
+    --------
+    >>> import httpx
+    >>> response = httpx.post("http://api-url/bulk_search", json={
+    ...     "queries": [
+    ...         {"query": "How does AI work?", "top_k": 3, "with_embedding": False},
+    ...         {"query": "What is machine learning?", "top_k": 2, "with_embedding": True}
+    ...     ]
+    ... })
+    >>> print(response.json())
+    {
+        "results": [
+            {
+                "results": [
+                    {"point": {...}, "document": {...}, "relevance_score": 0.95},
+                    {"point": {...}, "document": {...}, "relevance_score": 0.85},
+                    {"point": {...}, "document": {...}, "relevance_score": 0.75}
+                ]
+            },
+            {
+                "results": [
+                    {"point": {...}, "document": {...}, "relevance_score": 0.92},
+                    {"point": {...}, "document": {...}, "relevance_score": 0.88}
+                ]
+            }
+        ]
+    }
+
+    See Also
+    --------
+    BulkSearchRequest : The model defining the structure of the bulk search request.
+    BulkSearchResponse : The model defining the structure of the bulk search response.
+    vector_search : The underlying function performing individual vector similarity searches.
+    ensure_vectors : Function to prepare input vectors for search.
+
+    Notes
+    -----
+    The bulk search process can be visualized as follows:
+    """  # noqa: E501
+
     if not request.queries:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -955,6 +1156,4 @@ async def api_bulk_search(
     time_end = time.perf_counter()
     elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f}ms"
     response.headers["X-Processing-Time"] = elapsed_time_ms_str
-    if debug:
-        print(f"Elapsed time: {elapsed_time_ms_str}")
     return BulkSearchResponse.from_bulk_search_results(bulk_search_results)
