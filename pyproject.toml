@@ -32,6 +32,7 @@ neoteroi-mkdocs = "*"
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
+faker = "*"
 isort = "*"
 poetry-plugin-export = "^1.6.0"
 pytest = "^8"
