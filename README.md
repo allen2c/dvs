@@ -63,6 +63,11 @@ sequenceDiagram
    ./download_db.sh
    ```
 
+   Or use git lfs to download the demo database:
+   ```shell
+   git lfs pull --include="examples/documents.duckdb" && cp examples/documents.duckdb ./documents.duckdb
+   ```
+
 ## Usage
 
 1. Start the FastAPI server:
