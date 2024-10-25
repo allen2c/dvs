@@ -16,6 +16,11 @@ mkdocs:
 pytest:
 	python -m pytest --cov=languru --cov-config=.coveragerc --cov-report=xml:coverage.xml
 
+# Scripts
+download-db:
+	chmod +x ./download_db.sh
+	./download_db.sh
+
 # Server
 run-server:
 	fastapi run duckdb_vss_api.py
