@@ -2,7 +2,8 @@
 authors = ["Allen Chou <f1470891079@gmail.com>"]
 description = "Deploy simple vector similarity search service by duckdb."
 license = "MIT"
-name = "dvs"
+name = "dvs-py"
+packages = [{ include = "dvs" }]
 readme = "README.md"
 version = "0.1.0"
 
