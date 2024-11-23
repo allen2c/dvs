@@ -61,461 +61,23 @@ For detailed API documentation, refer to the OpenAPI schema available at the /do
 """  # noqa: E501
 
 import asyncio
-import base64
-import binascii
-import json
-import pathlib
 import time
 from collections import OrderedDict
-from enum import StrEnum
 from textwrap import dedent
-from typing import Any, Dict, List, Literal, Optional, Text, Tuple, Union
+from typing import Dict, List, Optional, Text, Tuple, Union
 
 import duckdb
-import numpy as np
 import openai
 from diskcache import Cache
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
 
-# Column names
-column_names_with_embedding = ("point_id", "document_id", "content_md5", "embedding")
-column_names_without_embedding = ("point_id", "document_id", "content_md5")
-
-# SQL statement for vector search
-sql_stmt_vss = dedent(
-    """
-    WITH vector_search AS (
-        SELECT {column_names_expr}, array_cosine_similarity(embedding, ?::FLOAT[{embedding_dimensions}]) AS relevance_score
-        FROM {points_table_name}
-        ORDER BY relevance_score DESC
-        LIMIT {top_k}
-    )
-    SELECT p.*, d.*
-    FROM vector_search p
-    JOIN {documents_table_name} d ON p.document_id = d.document_id
-    ORDER BY p.relevance_score DESC
-    """  # noqa: E501
-).strip()
-
-
-async def to_vectors_with_cache(
-    queries: Union[List[Text], Text], *, cache: Cache, openai_client: "openai.OpenAI"
-) -> List[List[float]]:
-    """
-    Convert input queries to vector embeddings using OpenAI's API, with caching.
-
-    This function takes a list of text queries or a single text query and converts them
-    into vector embeddings. It uses a cache to store and retrieve previously computed
-    embeddings, reducing API calls and improving performance for repeated queries.
-
-    Parameters
-    ----------
-    queries : Union[List[Text], Text]
-        A single text query or a list of text queries to be converted into vector embeddings.
-    cache : Cache
-        A diskcache.Cache object used for storing and retrieving cached embeddings.
-    openai_client : openai.OpenAI
-        An initialized OpenAI client object for making API calls.
-
-    Returns
-    -------
-    List[List[float]]
-        A list of vector embeddings, where each embedding is a list of floats.
-
-    Raises
-    ------
-    ValueError
-        If the function fails to get embeddings for all queries.
-
-    Notes
-    -----
-    - The function first checks the cache for each query. If found, it uses the cached embedding.
-    - For queries not in the cache, it batches them and sends a single request to the OpenAI API.
-    - New embeddings are cached with an expiration time of 7 days (604800 seconds).
-    - The embedding model and dimensions are determined by the global `settings` object.
-
-    Example
-    -------
-    >>> cache = Cache("./.cache/embeddings.cache")
-    >>> openai_client = openai.OpenAI(api_key="your-api-key")
-    >>> queries = ["How does AI work?", "What is machine learning?"]
-    >>> embeddings = await to_vectors_with_cache(queries, cache=cache, openai_client=openai_client)
-    >>> print(len(embeddings), len(embeddings[0]))
-    2 512
-
-    See Also
-    --------
-    ensure_vectors : A higher-level function that handles various input types and uses this function.
-    """  # noqa: E501
-
-    queries = [queries] if isinstance(queries, Text) else queries
-    output_vectors: List[Optional[List[float]]] = [None] * len(queries)
-    not_cached_indices: List[int] = []
-    for idx, query in enumerate(queries):
-        cached_vector = await asyncio.to_thread(cache.get, query)
-        if cached_vector is None:
-            not_cached_indices.append(idx)
-        else:
-            output_vectors[idx] = cached_vector  # type: ignore
-
-    # Get embeddings for queries that are not cached
-    if not_cached_indices:
-        not_cached_queries = [queries[i] for i in not_cached_indices]
-        embeddings_response = await asyncio.to_thread(
-            openai_client.embeddings.create,
-            input=not_cached_queries,
-            model=settings.EMBEDDING_MODEL,
-            dimensions=settings.EMBEDDING_DIMENSIONS,
-        )
-        embeddings_data = embeddings_response.data
-        for idx, embedding in zip(not_cached_indices, embeddings_data):
-            await asyncio.to_thread(
-                cache.set, queries[idx], embedding.embedding, expire=604800
-            )
-            output_vectors[idx] = embedding.embedding  # type: ignore
-
-    if any(v is None for v in output_vectors):
-        raise ValueError("Failed to get embeddings for all queries")
-    return output_vectors  # type: ignore
-
-
-def decode_base64_to_vector(base64_str: Text) -> List[float]:
-    """
-    Decode a base64 encoded string to a vector of floats.
-
-    This function attempts to decode a base64 encoded string into a vector of
-    float values. It's particularly useful for converting encoded embeddings
-    back into their original numerical representation.
-
-    Parameters
-    ----------
-    base64_str : Text
-        A string containing the base64 encoded vector data.
-
-    Returns
-    -------
-    Optional[List[float]]
-        If decoding is successful, returns a list of float values representing
-        the vector. If decoding fails, returns None.
-
-    Notes
-    -----
-    The function uses numpy to interpret the decoded bytes as a float32 array
-    before converting it to a Python list. This approach is efficient for
-    handling large vectors.
-
-    The function is designed to gracefully handle decoding errors, returning
-    None instead of raising an exception if the input is not a valid base64
-    encoded string or cannot be interpreted as a float32 array.
-
-    Examples
-    --------
-    >>> encoded = "AAAAAAAAAEA/AABAQAAAQUA="
-    >>> result = decode_base64_to_vector(encoded)
-    >>> print(result)
-    [0.0, 0.5, 1.0, 1.5]
-
-    >>> invalid = "Not a base64 string"
-    >>> result = decode_base64_to_vector(invalid)
-    >>> print(result)
-    None
-
-    See Also
-    --------
-    base64.b64decode : For decoding base64 strings.
-    numpy.frombuffer : For creating numpy arrays from buffer objects.
-    """  # noqa: E501
-
-    try:
-        vector = np.frombuffer(  # type: ignore[no-untyped-call]
-            base64.b64decode(base64_str), dtype="float32"
-        ).tolist()
-        if len(vector) != settings.EMBEDDING_DIMENSIONS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid embedding dimensions: {len(vector)}",
-            )
-        return vector
-    except (binascii.Error, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid base64 string: {base64_str}",
-        )
-
-
-async def vector_search(
-    vector: List[float],
-    *,
-    top_k: int,
-    embedding_dimensions: int,
-    documents_table_name: Text,
-    points_table_name: Text,
-    conn: "duckdb.DuckDBPyConnection",
-    with_embedding: bool = True,
-) -> List[Tuple["Point", Optional["Document"], float]]:
-    """
-    Perform a vector similarity search in a DuckDB database.
-
-    This function executes a vector similarity search using the provided embedding vector
-    against the points stored in the specified DuckDB table. It returns the top-k most
-    similar points along with their associated documents and relevance scores.
-
-    Parameters
-    ----------
-    vector : List[float]
-        The query vector to search for similar points.
-    top_k : int
-        The number of most similar points to return.
-    embedding_dimensions : int
-        The dimensionality of the embedding vectors.
-    documents_table_name : Text
-        The name of the table containing document information.
-    points_table_name : Text
-        The name of the table containing point information and embeddings.
-    conn : duckdb.DuckDBPyConnection
-        An active connection to the DuckDB database.
-    with_embedding : bool, optional
-        Whether to include the embedding vector in the results (default is True).
-
-    Returns
-    -------
-    List[Tuple["Point", Optional["Document"], float]]
-        A list of tuples, each containing:
-        - Point: The matched point information.
-        - Document: The associated document information (if available).
-        - float: The relevance score (cosine similarity) between the query vector and the point.
-
-    Notes
-    -----
-    - The function uses array_cosine_similarity for calculating the similarity between vectors.
-    - Results are ordered by descending relevance score.
-    - The SQL query joins the points table with the documents table to retrieve associated document information.
-
-    Examples
-    --------
-    >>> conn = duckdb.connect('my_database.duckdb')
-    >>> query_vector = [0.1, 0.2, 0.3, ..., 0.5]  # 512-dimensional vector
-    >>> results = await vector_search(
-    ...     query_vector,
-    ...     top_k=5,
-    ...     embedding_dimensions=512,
-    ...     documents_table_name='documents',
-    ...     points_table_name='points',
-    ...     conn=conn
-    ... )
-    >>> for point, document, score in results:
-    ...     print(f"Point ID: {point.point_id}, Score: {score}, Document: {document.name}")
-
-    See Also
-    --------
-    ensure_vectors : Function to prepare input vectors for search.
-    api_search : API endpoint that utilizes this vector search function.
-    """  # noqa: E501
-
-    output: List[Tuple["Point", Optional["Document"], float]] = []
-
-    column_names_expr = ", ".join(
-        list(
-            column_names_with_embedding
-            if with_embedding
-            else column_names_without_embedding
-        )
-    )
-    query = sql_stmt_vss.format(
-        top_k=top_k,
-        column_names_expr=column_names_expr,
-        embedding_dimensions=embedding_dimensions,
-        documents_table_name=documents_table_name,
-        points_table_name=points_table_name,
-    )
-    params = [vector]
-
-    # Fetch results
-    result = await asyncio.to_thread(conn.execute, query, params)
-    fetchall_result = await asyncio.to_thread(result.fetchall)
-
-    # Convert to output format
-    assert result.description is not None
-    for row in fetchall_result:
-        row_dict = dict(zip([desc[0] for desc in result.description], row))
-        row_dict["metadata"] = json.loads(row_dict.get("metadata") or "{}")
-        row_dict["embedding"] = row_dict.get("embedding") or []
-        output.append(
-            (
-                Point.model_validate(row_dict),
-                Document.model_validate(row_dict),
-                row_dict["relevance_score"],
-            )
-        )
-
-    return output
-
-
-class Settings(BaseSettings):
-    """
-    Settings for the DuckDB VSS API.
-
-    This class defines the configuration parameters for the DuckDB Vector Similarity Search (VSS) API.
-    It uses Pydantic's BaseSettings for easy environment variable loading and validation.
-    """  # noqa: E501
-
-    APP_NAME: Text = Field(
-        default="DVS",
-        description="The name of the application. Used for identification and logging purposes.",  # noqa: E501
-    )
-    APP_VERSION: Text = Field(
-        default="0.1.0",
-        description="The version of the application. Follows semantic versioning.",
-    )
-    APP_ENV: Literal["development", "production", "test"] = Field(
-        default="development",
-        description="The environment in which the application is running. Affects logging and behavior.",  # noqa: E501
-    )
-
-    # DuckDB
-    DUCKDB_PATH: Text = Field(
-        default="./data/documents.duckdb",
-        description="The file path to the DuckDB database file containing document and embedding data.",  # noqa: E501
-    )
-    POINTS_TABLE_NAME: Text = Field(
-        default="points",
-        description="The name of the table in DuckDB that stores the vector embeddings and related point data.",  # noqa: E501
-    )
-    DOCUMENTS_TABLE_NAME: Text = Field(
-        default="documents",
-        description="The name of the table in DuckDB that stores the document metadata.",  # noqa: E501
-    )
-    EMBEDDING_MODEL: Text = Field(
-        default="text-embedding-3-small",
-        description="The name of the OpenAI embedding model to use for generating vector embeddings.",  # noqa: E501
-    )
-    EMBEDDING_DIMENSIONS: int = Field(
-        default=512,
-        description="The number of dimensions in the vector embeddings generated by the chosen model.",  # noqa: E501
-    )
-
-    # OpenAI
-    OPENAI_API_KEY: Optional[Text] = Field(
-        default=None,
-        description="The API key for authenticating with OpenAI services. If not provided, OpenAI features will be disabled.",  # noqa: E501
-    )
-
-    # Embeddings
-    CACHE_PATH: Text = Field(
-        default="./.cache/embeddings.cache",
-        description="The file path to the cache directory for storing computed embeddings.",  # noqa: E501
-    )
-    CACHE_SIZE_LIMIT: int = Field(
-        default=100 * 2**20,
-        description="The maximum size of the embeddings cache in bytes. Default is 100MB.",  # noqa: E501
-    )
-
-    def validate_variables(self):
-        """
-        Validate the variables in the settings.
-        """
-
-        if not pathlib.Path(self.DUCKDB_PATH).exists():
-            raise ValueError(f"Database file does not exist: {self.DUCKDB_PATH}")
-        else:
-            self.DUCKDB_PATH = str(pathlib.Path(self.DUCKDB_PATH).resolve())
-
-
-class Point(BaseModel):
-    """
-    Represents a point in the vector space, associated with a document.
-
-    This class encapsulates the essential information about a point in the vector space,
-    including its unique identifier, the document it belongs to, a content hash, and its
-    vector embedding.
-
-    Attributes:
-        point_id (Text): A unique identifier for the point in the vector space.
-        document_id (Text): The identifier of the document this point is associated with.
-        content_md5 (Text): An MD5 hash of the content, used for quick comparisons and integrity checks.
-        embedding (List[float]): The vector embedding representation of the point in the vector space.
-
-    The Point class is crucial for vector similarity search operations, as it contains
-    the embedding that is used for comparison with query vectors.
-    """  # noqa: E501
-
-    point_id: Text = Field(
-        ...,
-        description="Unique identifier for the point in the vector space.",
-    )
-    document_id: Text = Field(
-        ...,
-        description="Identifier of the associated document.",
-    )
-    content_md5: Text = Field(
-        ...,
-        description="MD5 hash of the content for quick comparison and integrity checks.",  # noqa: E501
-    )
-    embedding: List[float] = Field(
-        ...,
-        description="Vector embedding representation of the point.",
-    )
-
-
-class Document(BaseModel):
-    """
-    Represents a document in the system, containing metadata and content information.
-
-    This class encapsulates all the relevant information about a document, including
-    its unique identifier, name, content, and various metadata fields. It is designed
-    to work in conjunction with the Point class for vector similarity search operations.
-
-    Attributes:
-        document_id (Text): A unique identifier for the document.
-        name (Text): The name or title of the document.
-        content (Text): The full text content of the document.
-        content_md5 (Text): An MD5 hash of the content for integrity checks.
-        metadata (Optional[Dict[Text, Any]]): Additional metadata associated with the document.
-        created_at (Optional[int]): Unix timestamp of when the document was created.
-        updated_at (Optional[int]): Unix timestamp of when the document was last updated.
-
-    The Document class is essential for storing and retrieving document information
-    in the vector similarity search system. It provides a structured way to manage
-    document data and metadata, which can be used in conjunction with vector embeddings
-    for advanced search and retrieval operations.
-    """  # noqa: E501
-
-    document_id: Text = Field(
-        ...,
-        description="Unique identifier for the document.",
-    )
-    name: Text = Field(
-        ...,
-        description="Name or title of the document.",
-    )
-    content: Text = Field(
-        ...,
-        description="Full text content of the document.",
-    )
-    content_md5: Text = Field(
-        ...,
-        description="MD5 hash of the content for integrity checks.",
-    )
-    metadata: Optional[Dict[Text, Any]] = Field(
-        default_factory=dict,
-        description="Additional metadata associated with the document.",
-    )
-    created_at: Optional[int] = Field(
-        default=None,
-        description="Unix timestamp of document creation.",
-    )
-    updated_at: Optional[int] = Field(
-        default=None,
-        description="Unix timestamp of last document update.",
-    )
-
-
-class EncodingType(StrEnum):
-    PLAINTEXT = "plaintext"
-    BASE64 = "base64"
-    VECTOR = "vector"
+import dvs.utils.to as TO
+import dvs.utils.vss as VSS
+from dvs.config import settings
+from dvs.types.document import Document
+from dvs.types.encoding_type import EncodingType
+from dvs.types.point import Point
 
 
 class SearchRequest(BaseModel):
@@ -659,7 +221,7 @@ class SearchRequest(BaseModel):
                 )
             if isinstance(search_request.query, Text):
                 if search_request.encoding == EncodingType.BASE64:
-                    output_vectors[idx] = decode_base64_to_vector(search_request.query)
+                    output_vectors[idx] = TO.base64_to_vector(search_request.query)
                 elif search_request.encoding == EncodingType.VECTOR:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -675,10 +237,12 @@ class SearchRequest(BaseModel):
 
         # Ensure all required embeddings are text
         if len(required_emb_items) > 0:
-            embeddings = await to_vectors_with_cache(
+            embeddings = await TO.queries_to_vectors_with_cache(
                 list(required_emb_items.values()),
                 cache=cache,
                 openai_client=openai_client,
+                model=settings.EMBEDDING_MODEL,
+                dimensions=settings.EMBEDDING_DIMENSIONS,
             )
             for idx, embedding in zip(required_emb_items.keys(), embeddings):
                 output_vectors[idx] = embedding
@@ -978,9 +542,6 @@ class BulkSearchResponse(BaseModel):
         )
 
 
-# Settings
-settings = Settings()
-
 # FastAPI app
 app = FastAPI(
     debug=False if settings.APP_ENV == "production" else True,
@@ -1197,7 +758,7 @@ async def api_search(
     vector = vectors[0]
 
     # Search
-    search_results = await vector_search(
+    search_results = await VSS.vector_search(
         vector,
         top_k=request.top_k,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
@@ -1340,7 +901,7 @@ async def api_bulk_search(
     # Search
     bulk_search_results = await asyncio.gather(
         *[
-            vector_search(
+            VSS.vector_search(
                 vector,
                 top_k=req_query.top_k,
                 embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
