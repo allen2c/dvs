@@ -1,10 +1,10 @@
-# DuckDB Vector Similarity Search API
+# DVS - DuckDB Vector Similarity Search API
 
 A high-performance vector similarity search API powered by DuckDB and OpenAI embeddings.
 
 ## Overview
 
-DuckDB-VSS-API is a FastAPI-based web service that provides efficient vector similarity search capabilities using DuckDB as the backend database and OpenAI's embedding models for vector representation. This project is designed for applications requiring fast similarity search capabilities, such as recommendation systems, semantic search engines, and content discovery platforms.
+DVS (DuckDB-VSS-API) is a FastAPI-based web service that provides efficient vector similarity search capabilities using DuckDB as the backend database and OpenAI's embedding models for vector representation. This project is designed for applications requiring fast similarity search capabilities, such as recommendation systems, semantic search engines, and content discovery platforms.
 
 ## Key Features
 
@@ -42,8 +42,8 @@ sequenceDiagram
 
 1. Clone the repository:
    ```shell
-   git clone https://github.com/ChouYuJung/duckdb-vss-api.git
-   cd duckdb-vss-api
+   git clone https://github.com/allen2c/dvs.git
+   cd dvs
    ```
 
 2. Install dependencies using Poetry:

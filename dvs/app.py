@@ -1,5 +1,5 @@
 """
-DuckDB Vector Similarity Search (VSS) API
+DVS - DuckDB Vector Similarity Search (VSS) API
 
 This module implements a FastAPI-based web service for performing vector similarity searches
 using DuckDB as the backend database and OpenAI's embedding models for vector representation.
@@ -362,7 +362,7 @@ class Settings(BaseSettings):
     """  # noqa: E501
 
     APP_NAME: Text = Field(
-        default="duckdb-vss-api",
+        default="DVS",
         description="The name of the application. Used for identification and logging purposes.",  # noqa: E501
     )
     APP_VERSION: Text = Field(
@@ -988,7 +988,7 @@ app = FastAPI(
     summary="A high-performance vector similarity search API powered by DuckDB and OpenAI embeddings",  # noqa: E501
     description=dedent(
         """
-        The DuckDB Vector Similarity Search (VSS) API provides a fast and efficient way to perform
+        DVS - The DuckDB Vector Similarity Search (VSS) API provides a fast and efficient way to perform
         vector similarity searches on large datasets. It leverages DuckDB for data storage and
         querying, and OpenAI's embedding models for vector representation of text data.
 
@@ -1006,7 +1006,7 @@ app = FastAPI(
     version=settings.APP_VERSION,
     contact={
         "name": "DuckDB VSS API",
-        "url": "https://github.com/ChouYuJung/duckdb-vss-api",
+        "url": "https://github.com/allen2c/dvs.git",
         "email": "f1470891079@gmail.com",
     },
     license_info={

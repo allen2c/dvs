@@ -40,7 +40,7 @@ download-db:
 
 # Server
 run-server:
-	fastapi run duckdb_vss_api.py
+	fastapi run dvs/app.py
 
 run-server-dev:
-	fastapi dev duckdb_vss_api.py
+	fastapi dev dvs/app.py

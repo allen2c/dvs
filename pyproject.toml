@@ -2,7 +2,7 @@
 authors = ["Allen Chou <f1470891079@gmail.com>"]
 description = "Deploy simple vector similarity search service by duckdb."
 license = "MIT"
-name = "duckdb-vss-api"
+name = "dvs"
 readme = "README.md"
 version = "0.1.0"
 
