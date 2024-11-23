@@ -7,7 +7,7 @@ if [ -z "$DOWNLOAD_DB_URL" ]; then
     exit 1
 fi
 
-FILENAME="./documents.duckdb"
+FILENAME="./data/documents.duckdb"
 
 # Check if file already exists
 if [ -f "$FILENAME" ]; then

@@ -138,7 +138,7 @@ async def to_vectors_with_cache(
 
     Example
     -------
-    >>> cache = Cache("./embeddings.cache")
+    >>> cache = Cache("./.cache/embeddings.cache")
     >>> openai_client = openai.OpenAI(api_key="your-api-key")
     >>> queries = ["How does AI work?", "What is machine learning?"]
     >>> embeddings = await to_vectors_with_cache(queries, cache=cache, openai_client=openai_client)
@@ -376,7 +376,7 @@ class Settings(BaseSettings):
 
     # DuckDB
     DUCKDB_PATH: Text = Field(
-        default="./documents.duckdb",
+        default="./data/documents.duckdb",
         description="The file path to the DuckDB database file containing document and embedding data.",  # noqa: E501
     )
     POINTS_TABLE_NAME: Text = Field(
@@ -404,7 +404,7 @@ class Settings(BaseSettings):
 
     # Embeddings
     CACHE_PATH: Text = Field(
-        default="./embeddings.cache",
+        default="./.cache/embeddings.cache",
         description="The file path to the cache directory for storing computed embeddings.",  # noqa: E501
     )
     CACHE_SIZE_LIMIT: int = Field(
@@ -625,7 +625,7 @@ class SearchRequest(BaseModel):
 
         Examples
         --------
-        >>> cache = Cache("./embeddings.cache")
+        >>> cache = Cache("./.cache/embeddings.cache")
         >>> openai_client = openai.OpenAI(api_key="your-api-key")
         >>> requests = [
         ...     SearchRequest(query="How does AI work?", top_k=5),

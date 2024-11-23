@@ -65,7 +65,7 @@ sequenceDiagram
 
    Or use git lfs to download the demo database:
    ```shell
-   git lfs pull --include="examples/documents.duckdb" && cp examples/documents.duckdb ./documents.duckdb
+   git lfs pull --include="examples/documents.duckdb" && cp examples/documents.duckdb ./data/documents.duckdb
    ```
 
 ## Usage
