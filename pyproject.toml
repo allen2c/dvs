@@ -16,6 +16,7 @@ openai = "^1"
 pydantic = "^2"
 pydantic-settings = "*"
 python = "^3.12"
+uuid-utils = "*"
 
 [tool.poetry.extras]
 all = []
