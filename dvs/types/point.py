@@ -2,6 +2,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Text
 
 from pydantic import BaseModel, Field
 
+from dvs.utils.ids import get_id
 from dvs.utils.qs import PointQuerySet, PointQuerySetDescriptor
 
 
@@ -24,7 +25,7 @@ class Point(BaseModel):
     """  # noqa: E501
 
     point_id: Text = Field(
-        ...,
+        default_factory=lambda: get_id("pt"),
         description="Unique identifier for the point in the vector space.",
     )
     document_id: Text = Field(

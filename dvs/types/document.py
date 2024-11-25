@@ -4,6 +4,7 @@ from typing import Any, ClassVar, Dict, Optional, Text
 
 from pydantic import BaseModel, Field
 
+from dvs.utils.ids import get_id
 from dvs.utils.qs import DocumentQuerySet, DocumentQuerySetDescriptor
 
 
@@ -31,7 +32,7 @@ class Document(BaseModel):
     """  # noqa: E501
 
     document_id: Text = Field(
-        ...,
+        default_factory=lambda: get_id("doc"),
         description="Unique identifier for the document.",
     )
     name: Text = Field(
