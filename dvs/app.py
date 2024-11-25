@@ -60,6 +60,6 @@ For detailed API documentation, refer to the OpenAPI schema available at the /do
 
 """  # noqa: E501
 
-from dvs.app_builder import init_app
+from dvs.app_builder import build_app
 
-app = init_app()
+app = build_app()
