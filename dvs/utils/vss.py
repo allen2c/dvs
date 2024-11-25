@@ -108,14 +108,16 @@ async def vector_search(
     assert result.description is not None
     for row in fetchall_result:
         row_dict = dict(zip([desc[0] for desc in result.description], row))
-        row_dict["metadata"] = json.loads(row_dict.get("metadata") or "{}")
-        row_dict["embedding"] = row_dict.get("embedding") or []
-        output.append(
-            (
-                Point.model_validate(row_dict),
-                Document.model_validate(row_dict),
-                row_dict["relevance_score"],
-            )
+        row_dict["point_metadata"] = json.loads(row_dict.get("point_metadata") or "{}")
+        row_dict["document_metadata"] = json.loads(
+            row_dict.get("document_metadata") or "{}"
         )
+        row_dict["embedding"] = row_dict.get("embedding") or []
+
+        _point = Point.model_validate(row_dict)
+        _point.metadata = _point.metadata or {}
+        _document = Document.model_validate(row_dict)
+        _document.metadata = _document.metadata or {}
+        output.append((_point, _document, row_dict["relevance_score"]))
 
     return output

@@ -10,7 +10,7 @@ SQL_STMT_VSS: Final[Text] = dedent(
         ORDER BY relevance_score DESC
         LIMIT {top_k}
     )
-    SELECT p.*, d.*
+    SELECT p.*, d.*, p.metadata AS point_metadata, d.metadata AS document_metadata
     FROM vector_search p
     JOIN {documents_table_name} d ON p.document_id = d.document_id
     ORDER BY p.relevance_score DESC

@@ -1,6 +1,8 @@
-from typing import List, Text
+from typing import Any, ClassVar, Dict, List, Optional, Text
 
 from pydantic import BaseModel, Field
+
+from dvs.utils.qs import PointQuerySet, PointQuerySetDescriptor
 
 
 class Point(BaseModel):
@@ -34,6 +36,21 @@ class Point(BaseModel):
         description="MD5 hash of the content for quick comparison and integrity checks.",  # noqa: E501
     )
     embedding: List[float] = Field(
-        ...,
+        default_factory=list,
         description="Vector embedding representation of the point.",
     )
+    metadata: Optional[Dict[Text, Any]] = Field(
+        default_factory=dict,
+        description="Additional metadata associated with the point.",
+    )
+
+    # Class variables
+    objects: ClassVar["PointQuerySetDescriptor"] = PointQuerySetDescriptor()
+
+    @classmethod
+    def query_set(cls) -> "PointQuerySet":
+        return PointQuerySet(cls)
+
+    @property
+    def is_embedded(self) -> bool:
+        return len(self.embedding) > 0

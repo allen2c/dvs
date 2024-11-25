@@ -3,6 +3,9 @@ from typing import Literal, Optional, Text
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
+from rich.console import Console
+
+console = Console()
 
 
 class Settings(BaseSettings):

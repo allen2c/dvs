@@ -1,6 +1,10 @@
-from typing import Any, Dict, Optional, Text
+import hashlib
+import time
+from typing import Any, ClassVar, Dict, Optional, Text
 
 from pydantic import BaseModel, Field
+
+from dvs.utils.qs import DocumentQuerySet, DocumentQuerySetDescriptor
 
 
 class Document(BaseModel):
@@ -54,3 +58,23 @@ class Document(BaseModel):
         default=None,
         description="Unix timestamp of last document update.",
     )
+
+    # Class variables
+    objects: ClassVar["DocumentQuerySetDescriptor"] = DocumentQuerySetDescriptor()
+
+    @classmethod
+    def query_set(cls) -> "DocumentQuerySet":
+        return DocumentQuerySet(cls)
+
+    @classmethod
+    def hash_content(cls, content: Text) -> Text:
+        return hashlib.md5(content.strip().encode("utf-8")).hexdigest()
+
+    def strip(self, *, copy: bool = False) -> "Document":
+        _doc = self.model_copy(deep=True) if copy else self
+        _doc.content = _doc.content.strip()
+        new_md5 = self.hash_content(_doc.content)
+        if _doc.content_md5 != new_md5:
+            _doc.content_md5 = new_md5
+            _doc.updated_at = int(time.time())
+        return _doc
