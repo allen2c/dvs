@@ -257,6 +257,13 @@ class PointQuerySet:
             f"INSERT INTO {settings.POINTS_TABLE_NAME} ({columns_expr}) "
             + f"VALUES ({placeholders})"
         )
+        query = (
+            "INSTALL vss;\n"
+            + "LOAD vss;\n"
+            + "INSTALL json;\n"
+            + "LOAD json;\n"
+            + f"\n{query}\n"
+        )
         if debug:
             _display_params = display_sql_parameters(parameters)
             console.print(
