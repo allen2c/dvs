@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 
 import dvs.utils.hash
 import dvs.utils.ids
+import dvs.utils.qs
 from dvs.config import console, settings
-from dvs.utils.qs import DocumentQuerySet, DocumentQuerySetDescriptor
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -68,11 +68,13 @@ class Document(BaseModel):
     )
 
     # Class variables
-    objects: ClassVar["DocumentQuerySetDescriptor"] = DocumentQuerySetDescriptor()
+    objects: ClassVar[dvs.utils.qs.DocumentQuerySetDescriptor] = (
+        dvs.utils.qs.DocumentQuerySetDescriptor()
+    )
 
     @classmethod
-    def query_set(cls) -> "DocumentQuerySet":
-        return DocumentQuerySet(cls)
+    def query_set(cls) -> dvs.utils.qs.DocumentQuerySet:
+        return dvs.utils.qs.DocumentQuerySet(cls)
 
     @classmethod
     def hash_content(cls, content: Text) -> Text:

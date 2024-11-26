@@ -5,8 +5,8 @@ from tqdm import tqdm
 
 import dvs.utils.chunk
 import dvs.utils.ids
+import dvs.utils.qs
 from dvs.config import settings
-from dvs.utils.qs import PointQuerySet, PointQuerySetDescriptor
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -54,11 +54,13 @@ class Point(BaseModel):
     )
 
     # Class variables
-    objects: ClassVar["PointQuerySetDescriptor"] = PointQuerySetDescriptor()
+    objects: ClassVar[dvs.utils.qs.PointQuerySetDescriptor] = (
+        dvs.utils.qs.PointQuerySetDescriptor()
+    )
 
     @classmethod
-    def query_set(cls) -> "PointQuerySet":
-        return PointQuerySet(cls)
+    def query_set(cls) -> dvs.utils.qs.PointQuerySet:
+        return dvs.utils.qs.PointQuerySet(cls)
 
     @classmethod
     def set_embeddings_from_contents(
