@@ -58,6 +58,7 @@ class Point(BaseModel):
     )
     embedding: List[float] = Field(
         default_factory=list,
+        max_length=settings.EMBEDDING_DIMENSIONS,
         description="Vector embedding representation of the point.",
     )
     metadata: Optional[Dict[Text, Any]] = Field(
@@ -154,7 +155,11 @@ class Point(BaseModel):
                         )
 
         output = list(points)
-        if any(pt.is_embedded is False for pt in output):
+        if any(
+            pt.is_embedded is False
+            or len(pt.embedding) != settings.EMBEDDING_DIMENSIONS
+            for pt in output
+        ):
             raise ValueError("Not all points were embedded, it is programmer error")
         if debug is True:
             console.print(f"Created {len(output)} embeddings")

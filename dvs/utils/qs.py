@@ -1,5 +1,6 @@
 import json
 import time
+from textwrap import dedent
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -45,11 +46,23 @@ def show_tables(conn: "duckdb.DuckDBPyConnection") -> Tuple[Text, ...]:
     return tuple(r[0] for r in res)
 
 
-def install_extensions(conn: "duckdb.DuckDBPyConnection") -> None:
-    conn.sql("INSTALL vss;")
-    conn.sql("LOAD vss;")
-    conn.sql("INSTALL json;")
-    conn.sql("LOAD json;")
+def install_extensions(
+    conn: "duckdb.DuckDBPyConnection", *, debug: bool = False
+) -> None:
+    sql_stmt = dedent(
+        """
+        INSTALL vss;
+        LOAD vss;
+        INSTALL json;
+        LOAD json;
+        """
+    ).strip()
+    if debug:
+        console.print(
+            "\nInstalling extensions with SQL:\n"
+            + f"{DISPLAY_SQL_QUERY.format(sql=sql_stmt)}\n"
+        )
+    conn.sql(sql_stmt)
 
 
 class PointQuerySet:
@@ -86,7 +99,7 @@ class PointQuerySet:
             )
 
         # Install JSON and VSS extensions
-        install_extensions(conn=conn)
+        install_extensions(conn=conn, debug=debug)
 
         # Create table
         create_table_sql = openapi_to_create_table_sql(
@@ -96,7 +109,11 @@ class PointQuerySet:
             indexes=["document_id", "content_md5"],
         ).strip()
         create_table_sql = (
-            create_table_sql
+            "INSTALL vss;\n"
+            + "LOAD vss;\n"
+            + "INSTALL json;\n"
+            + "LOAD json;\n"
+            + f"\n{create_table_sql}\n"
             + "\nSET hnsw_enable_experimental_persistence = true;\n"  # Required for HNSW index  # noqa: E501
             + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
                 table_name=settings.POINTS_TABLE_NAME,
@@ -116,8 +133,37 @@ class PointQuerySet:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
             console.print(
-                f"Created table: '{settings.POINTS_TABLE_NAME}' in {time_elapsed:.6f} ms"  # noqa: E501
+                f"Created table: '{settings.POINTS_TABLE_NAME}' in {time_elapsed:.3f} ms"  # noqa: E501
             )
+        return True
+
+    def ensure_hnsw_index(
+        self,
+        *,
+        conn: "duckdb.DuckDBPyConnection",
+        debug: bool = False,
+    ) -> bool:
+        """"""
+
+        sql_stmt = (
+            "INSTALL vss;\n"
+            + "LOAD vss;\n"
+            + "INSTALL json;\n"
+            + "LOAD json;\n"
+            + "SET hnsw_enable_experimental_persistence = true;\n"  # Required for HNSW index  # noqa: E501
+            + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
+                table_name=settings.POINTS_TABLE_NAME,
+                column_name="embedding",
+                metric="cosine",
+            )
+        ).strip()
+        if debug:
+            console.print(
+                "\nCreating embedding hnsw index with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=sql_stmt)}\n"
+            )
+        conn.sql(sql_stmt)
+
         return True
 
     def retrieve(
@@ -162,7 +208,7 @@ class PointQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Retrieved point: '{point_id}' in {time_elapsed:.6f} ms")
+            console.print(f"Retrieved point: '{point_id}' in {time_elapsed:.3f} ms")
         return out
 
     def create(
@@ -224,8 +270,12 @@ class PointQuerySet:
 
         if time_start is not None:
             time_end = time.perf_counter()
-            time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Created {len(points)} points in {time_elapsed:.6f} ms")
+            time_elapsed = time_end - time_start
+            if time_elapsed > 1.0:
+                console.print(f"Created {len(points)} points in {time_elapsed:.3f} s")
+            else:
+                time_elapsed *= 1000
+                console.print(f"Created {len(points)} points in {time_elapsed:.3f} ms")
         return points
 
     def update(self, *args, **kwargs):
@@ -260,7 +310,7 @@ class PointQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Deleted point: '{point_id}' in {time_elapsed:.6f} ms")
+            console.print(f"Deleted point: '{point_id}' in {time_elapsed:.3f} ms")
         return None
 
     def list(
@@ -341,7 +391,7 @@ class PointQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Listed points in {time_elapsed:.6f} ms")
+            console.print(f"Listed points in {time_elapsed:.3f} ms")
         return out
 
     def gen(
@@ -418,7 +468,7 @@ class PointQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Counted points in {time_elapsed:.6f} ms")
+            console.print(f"Counted points in {time_elapsed:.3f} ms")
         return count
 
     def drop(
@@ -451,7 +501,7 @@ class PointQuerySet:
             time_elapsed = (time_end - time_start) * 1000
             console.print(
                 f"Dropped table: '{settings.POINTS_TABLE_NAME}' "
-                + f"in {time_elapsed:.6f} ms"
+                + f"in {time_elapsed:.3f} ms"
             )
         return None
 
@@ -486,7 +536,7 @@ class PointQuerySet:
             time_elapsed = (time_end - time_start) * 1000
             console.print(
                 f"Deleted outdated points of document: '{document_id}' in "
-                + f"{time_elapsed:.6f} ms"
+                + f"{time_elapsed:.3f} ms"
             )
         return None
 
@@ -538,7 +588,7 @@ class PointQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Deleted points in {time_elapsed:.6f} ms")
+            console.print(f"Deleted points in {time_elapsed:.3f} ms")
         return None
 
 
@@ -559,9 +609,6 @@ class DocumentQuerySet:
 
         time_start = time.perf_counter() if debug else None
 
-        # Install JSON and VSS extensions
-        install_extensions(conn=conn)
-
         # Check if table exists
         if (
             settings.DOCUMENTS_TABLE_NAME in show_tables(conn=conn)
@@ -574,7 +621,7 @@ class DocumentQuerySet:
             )
 
         # Install JSON and VSS extensions
-        install_extensions(conn=conn)
+        install_extensions(conn=conn, debug=debug)
 
         # Create table
         create_table_sql = openapi_to_create_table_sql(
@@ -598,7 +645,7 @@ class DocumentQuerySet:
             time_elapsed = (time_end - time_start) * 1000
             console.print(
                 f"Created table: '{settings.DOCUMENTS_TABLE_NAME}' in "
-                + f"{time_elapsed:.6f} ms"
+                + f"{time_elapsed:.3f} ms"
             )
         return True
 
@@ -648,7 +695,7 @@ class DocumentQuerySet:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
             console.print(
-                f"Retrieved document: '{document_id}' in {time_elapsed:.6f} ms"
+                f"Retrieved document: '{document_id}' in {time_elapsed:.3f} ms"
             )
         return out
 
@@ -710,10 +757,16 @@ class DocumentQuerySet:
 
         if time_start is not None:
             time_end = time.perf_counter()
-            time_elapsed = (time_end - time_start) * 1000
-            console.print(
-                f"Created {len(documents)} documents in {time_elapsed:.6f} ms"
-            )
+            time_elapsed = time_end - time_start
+            if time_elapsed > 1.0:
+                console.print(
+                    f"Created {len(documents)} documents in {time_elapsed:.3f} s"
+                )
+            else:
+                time_elapsed *= 1000
+                console.print(
+                    f"Created {len(documents)} documents in {time_elapsed:.3f} ms"
+                )
         return documents
 
     def update(
@@ -791,7 +844,7 @@ class DocumentQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Updated document: '{document_id}' in {time_elapsed:.6f} ms")
+            console.print(f"Updated document: '{document_id}' in {time_elapsed:.3f} ms")
         return document
 
     def remove(
@@ -821,7 +874,7 @@ class DocumentQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Deleted document: '{document_id}' in {time_elapsed:.6f} ms")
+            console.print(f"Deleted document: '{document_id}' in {time_elapsed:.3f} ms")
         return None
 
     def list(
@@ -892,7 +945,7 @@ class DocumentQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Listed documents in {time_elapsed:.6f} ms")
+            console.print(f"Listed documents in {time_elapsed:.3f} ms")
         return out
 
     def count(
@@ -934,7 +987,7 @@ class DocumentQuerySet:
         if time_start is not None:
             time_end = time.perf_counter()
             time_elapsed = (time_end - time_start) * 1000
-            console.print(f"Counted documents in {time_elapsed:.6f} ms")
+            console.print(f"Counted documents in {time_elapsed:.3f} ms")
         return count
 
     def drop(
@@ -967,7 +1020,7 @@ class DocumentQuerySet:
             time_elapsed = (time_end - time_start) * 1000
             console.print(
                 f"Dropped table: '{settings.DOCUMENTS_TABLE_NAME}' "
-                + f"in {time_elapsed:.6f} ms"
+                + f"in {time_elapsed:.3f} ms"
             )
         return None
 

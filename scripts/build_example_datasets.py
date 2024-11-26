@@ -10,6 +10,7 @@ import diskcache
 import duckdb
 import httpx
 from openai import OpenAI
+from rich.prompt import Confirm
 from tqdm import tqdm
 
 from dvs.config import console, settings
@@ -21,7 +22,13 @@ TARGET_DIR = Path("./data").resolve()
 TARGET_DB_PATH = Path(settings.DUCKDB_PATH).resolve()
 
 if TARGET_DB_PATH.exists():
-    raise ValueError(f"Target database path already exists: {TARGET_DB_PATH}")
+    if Confirm.ask(
+        f"Target database path already exists: {TARGET_DB_PATH}. Overwrite?"
+    ):
+        TARGET_DB_PATH.unlink()
+    else:
+        console.print("Target database path already exists, exiting.")
+        exit()
 
 
 openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
