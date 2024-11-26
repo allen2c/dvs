@@ -13,6 +13,7 @@ from openai import OpenAI
 from rich.prompt import Confirm
 from tqdm import tqdm
 
+import dvs.utils.vss
 from dvs.config import console, settings
 from dvs.types.document import Document
 from dvs.types.point import Point
@@ -109,6 +110,20 @@ async def main():
     points = Point.objects.bulk_create(
         points, conn=duckdb.connect(TARGET_DB_PATH), debug=True
     )
+
+    results = await dvs.utils.vss.vector_search(
+        vector=openai_client.embeddings.create(
+            input="What is the weather in London?",
+            model=settings.EMBEDDING_MODEL,
+            dimensions=settings.EMBEDDING_DIMENSIONS,
+        )
+        .data[0]
+        .embedding,
+        top_k=3,
+        conn=duckdb.connect(TARGET_DB_PATH),
+        with_embedding=False,
+    )
+    console.print(results)
 
 
 if __name__ == "__main__":
