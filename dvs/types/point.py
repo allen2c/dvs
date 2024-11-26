@@ -1,14 +1,26 @@
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Sequence, Text
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Text,
+)
 
 from pydantic import BaseModel, Field
 from tqdm import tqdm
 
+import dvs.utils.cache
 import dvs.utils.chunk
 import dvs.utils.ids
 import dvs.utils.qs
-from dvs.config import settings
+from dvs.config import console, settings
 
 if TYPE_CHECKING:
+    import diskcache
     from openai import OpenAI
 
     from dvs.types.document import Document
@@ -71,6 +83,7 @@ class Point(BaseModel):
         openai_client: "OpenAI",
         batch_size: int = 500,
         debug: bool = False,
+        cache: Optional["diskcache.Cache"] = None,
     ) -> Sequence["Point"]:
         if len(points) != len(contents):
             raise ValueError("Points and contents must be the same length")
@@ -88,7 +101,9 @@ class Point(BaseModel):
             )
 
         # Create embeddings
+        cache_hits_count = 0
         for batched_points, batched_contents in _iter_chunks:
+            # Ensure contents are clean strings
             _contents: List[Text] = [
                 (
                     content.strip()
@@ -97,18 +112,46 @@ class Point(BaseModel):
                 )
                 for content in batched_contents
             ]
+
+            # Check cache
+            _cache_hit: Set[int] = set()
+            if cache is not None:
+                for _idx, (_point, _content) in enumerate(
+                    zip(batched_points, _contents)
+                ):
+                    _cached_embedding = cache.get(
+                        dvs.utils.cache.get_embedding_cache_key(_content)
+                    )
+                    if _cached_embedding is not None:
+                        _point.embedding = _cached_embedding  # type: ignore
+                        _cache_hit.add(_idx)
+            cache_hits_count += len(_cache_hit)
+
+            # Create embeddings
+            _contents_to_embed = [
+                c for idx, c in enumerate(_contents) if idx not in _cache_hit
+            ]
             emb_res = openai_client.embeddings.create(
-                input=_contents,
+                input=_contents_to_embed,
                 model=settings.EMBEDDING_MODEL,
                 dimensions=settings.EMBEDDING_DIMENSIONS,
             )
-            if len(emb_res.data) != len(batched_points):
-                raise ValueError(
-                    "Embedding response and points must be the same length"
-                )
-            for point, embedding in zip(batched_points, emb_res.data):
+            for point, content, embedding in zip(
+                [pt for idx, pt in enumerate(batched_points) if idx not in _cache_hit],
+                _contents_to_embed,
+                emb_res.data,
+            ):
                 point.embedding = embedding.embedding
+                if cache is not None:
+                    cache.set(
+                        dvs.utils.cache.get_embedding_cache_key(content),
+                        embedding.embedding,
+                    )
 
+        if debug is True:
+            console.print(f"Created {len(points)} embeddings")
+            if cache is not None:
+                console.print(f"Cache hits: {cache_hits_count} / {len(points)}")
         return points
 
     @property
