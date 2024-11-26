@@ -67,6 +67,7 @@ class PointQuerySet:
         self,
         *,
         conn: "duckdb.DuckDBPyConnection",
+        raise_if_exists: bool = False,
         debug: bool = False,
     ) -> bool:
         """"""
@@ -74,7 +75,10 @@ class PointQuerySet:
         time_start = time.perf_counter() if debug else None
 
         # Check if table exists
-        if settings.POINTS_TABLE_NAME in show_tables(conn=conn):
+        if (
+            settings.POINTS_TABLE_NAME in show_tables(conn=conn)
+            and raise_if_exists is True
+        ):
             raise ConflictError(
                 f"Table '{settings.POINTS_TABLE_NAME}' already exists.",
                 response=httpx.Response(status_code=409),
@@ -548,9 +552,7 @@ class DocumentQuerySet:
         self,
         *,
         conn: "duckdb.DuckDBPyConnection",
-        touch_point: bool = True,
-        drop: bool = False,
-        force: bool = False,
+        raise_if_exists: bool = False,
         debug: bool = False,
     ) -> bool:
         """"""
@@ -561,7 +563,10 @@ class DocumentQuerySet:
         install_extensions(conn=conn)
 
         # Check if table exists
-        if settings.DOCUMENTS_TABLE_NAME in show_tables(conn=conn):
+        if (
+            settings.DOCUMENTS_TABLE_NAME in show_tables(conn=conn)
+            and raise_if_exists is True
+        ):
             raise ConflictError(
                 f"Table '{settings.DOCUMENTS_TABLE_NAME}' already exists.",
                 response=httpx.Response(status_code=409),
