@@ -1,10 +1,12 @@
 import asyncio
+import copy
 import json
 from typing import List, Optional, Text, Tuple
 
 import duckdb
 
 import dvs.utils.sql_stmts as SQL_STMTS
+from dvs.config import settings
 from dvs.types.columns import (
     COLUMN_NAMES_WITH_EMBEDDING,
     COLUMN_NAMES_WITHOUT_EMBEDDING,
@@ -17,9 +19,9 @@ async def vector_search(
     vector: List[float],
     *,
     top_k: int,
-    embedding_dimensions: int,
-    documents_table_name: Text,
-    points_table_name: Text,
+    embedding_dimensions: int = settings.EMBEDDING_DIMENSIONS,
+    documents_table_name: Text = settings.DOCUMENTS_TABLE_NAME,
+    points_table_name: Text = settings.POINTS_TABLE_NAME,
     conn: "duckdb.DuckDBPyConnection",
     with_embedding: bool = True,
 ) -> List[Tuple["Point", Optional["Document"], float]]:
@@ -108,16 +110,18 @@ async def vector_search(
     assert result.description is not None
     for row in fetchall_result:
         row_dict = dict(zip([desc[0] for desc in result.description], row))
-        row_dict["point_metadata"] = json.loads(row_dict.get("point_metadata") or "{}")
-        row_dict["document_metadata"] = json.loads(
-            row_dict.get("document_metadata") or "{}"
+        row_dict_doc = copy.deepcopy(row_dict)
+        row_dict_pt = row_dict
+        row_dict_pt["metadata"] = json.loads(
+            row_dict_pt.pop("point_metadata", None) or "{}"
         )
-        row_dict["embedding"] = row_dict.get("embedding") or []
+        row_dict_doc["metadata"] = json.loads(
+            row_dict_doc.pop("document_metadata", None) or "{}"
+        )
+        row_dict_pt["embedding"] = row_dict_pt.get("embedding") or []
 
-        _point = Point.model_validate(row_dict)
-        _point.metadata = _point.metadata or {}
-        _document = Document.model_validate(row_dict)
-        _document.metadata = _document.metadata or {}
+        _point = Point.model_validate(row_dict_pt)
+        _document = Document.model_validate(row_dict_doc)
         output.append((_point, _document, row_dict["relevance_score"]))
 
     return output

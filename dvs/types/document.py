@@ -54,7 +54,7 @@ class Document(BaseModel):
         ...,
         description="MD5 hash of the content for integrity checks.",
     )
-    metadata: Optional[Dict[Text, Any]] = Field(
+    metadata: Dict[Text, Any] = Field(
         default_factory=dict,
         description="Additional metadata associated with the document.",
     )

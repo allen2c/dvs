@@ -61,7 +61,7 @@ class Point(BaseModel):
         max_length=settings.EMBEDDING_DIMENSIONS,
         description="Vector embedding representation of the point.",
     )
-    metadata: Optional[Dict[Text, Any]] = Field(
+    metadata: Dict[Text, Any] = Field(
         default_factory=dict,
         description="Additional metadata associated with the point.",
     )
