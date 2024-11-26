@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Generator, List
 
 import diskcache
+import duckdb
 import httpx
 from openai import OpenAI
 from tqdm import tqdm
@@ -17,6 +18,10 @@ from dvs.types.point import Point
 
 DOWNLOAD_DIR = Path("./downloads").resolve()
 TARGET_DIR = Path("./data").resolve()
+TARGET_DB_PATH = Path(settings.DUCKDB_PATH).resolve()
+
+if TARGET_DB_PATH.exists():
+    raise ValueError(f"Target database path already exists: {TARGET_DB_PATH}")
 
 
 openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -83,6 +88,20 @@ async def main():
         points, docs, openai_client=openai_client, cache=cache, debug=True
     )
     console.print(f"Created {len(points)} embeddings")
+
+    Document.objects.touch(
+        conn=duckdb.connect(TARGET_DB_PATH), raise_if_exists=True, debug=True
+    )
+    Point.objects.touch(
+        conn=duckdb.connect(TARGET_DB_PATH), raise_if_exists=True, debug=True
+    )
+
+    docs = Document.objects.bulk_create(
+        docs, conn=duckdb.connect(TARGET_DB_PATH), debug=True
+    )
+    points = Point.objects.bulk_create(
+        points, conn=duckdb.connect(TARGET_DB_PATH), debug=True
+    )
 
 
 if __name__ == "__main__":
