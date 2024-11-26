@@ -1,11 +1,18 @@
-import hashlib
+import json
 import time
-from typing import Any, ClassVar, Dict, Optional, Text
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Text
 
 from pydantic import BaseModel, Field
 
-from dvs.utils.ids import get_id
+import dvs.utils.hash
+import dvs.utils.ids
+from dvs.config import console, settings
 from dvs.utils.qs import DocumentQuerySet, DocumentQuerySetDescriptor
+
+if TYPE_CHECKING:
+    from openai import OpenAI
+
+    from dvs.types.point import Point
 
 
 class Document(BaseModel):
@@ -32,7 +39,7 @@ class Document(BaseModel):
     """  # noqa: E501
 
     document_id: Text = Field(
-        default_factory=lambda: get_id("doc"),
+        default_factory=lambda: dvs.utils.ids.get_id("doc"),
         description="Unique identifier for the document.",
     )
     name: Text = Field(
@@ -69,7 +76,7 @@ class Document(BaseModel):
 
     @classmethod
     def hash_content(cls, content: Text) -> Text:
-        return hashlib.md5(content.strip().encode("utf-8")).hexdigest()
+        return dvs.utils.hash.hash_content(content)
 
     def strip(self, *, copy: bool = False) -> "Document":
         _doc = self.model_copy(deep=True) if copy else self
@@ -79,3 +86,42 @@ class Document(BaseModel):
             _doc.content_md5 = new_md5
             _doc.updated_at = int(time.time())
         return _doc
+
+    def to_points(
+        self,
+        *,
+        openai_client: Optional["OpenAI"] = None,
+        with_embeddings: bool = False,
+        metadata: Optional[Dict[Text, Any]] = None,
+        debug: bool = False,
+    ) -> List["Point"]:
+        """"""
+
+        self.strip()
+        _meta = json.loads(json.dumps(metadata or {}, default=str))
+        _pt_data = {
+            "point_id": dvs.utils.ids.get_id("pt"),
+            "document_id": self.document_id,
+            "content_md5": self.content_md5,
+            "metadata": _meta,
+        }
+        _pt = Point.model_validate(_pt_data)
+        if with_embeddings:
+            if openai_client is None:
+                raise ValueError(
+                    "OpenAI client is required when `with_embeddings` is True"
+                )
+            _pt.embedding = (
+                openai_client.embeddings.create(
+                    input=self.content,
+                    model=settings.EMBEDDING_MODEL,
+                    dimensions=settings.EMBEDDING_DIMENSIONS,
+                )
+                .data[0]
+                .embedding
+            )
+        _pts = [_pt]
+
+        if debug:
+            console.print(f"Created {len(_pts)} points")
+        return _pts

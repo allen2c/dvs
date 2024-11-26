@@ -29,7 +29,7 @@ class Settings(BaseSettings):
         description="The environment in which the application is running. Affects logging and behavior.",  # noqa: E501
     )
     APP_READY: bool = Field(
-        default=True,
+        default=False,
         description="Whether the application is ready to serve requests.",
     )
 
@@ -77,10 +77,6 @@ class Settings(BaseSettings):
         """
 
         if not pathlib.Path(self.DUCKDB_PATH).exists():
-            console.print(
-                f"Database file does not exist: {self.DUCKDB_PATH}",
-                style="bright_red",
-            )
             self.APP_READY = False
         else:
             self.DUCKDB_PATH = str(pathlib.Path(self.DUCKDB_PATH).resolve())
