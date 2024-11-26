@@ -82,9 +82,9 @@ class Point(BaseModel):
         *,
         openai_client: "OpenAI",
         batch_size: int = 500,
-        debug: bool = False,
         cache: Optional["diskcache.Cache"] = None,
-    ) -> Sequence["Point"]:
+        debug: bool = False,
+    ) -> List["Point"]:
         if len(points) != len(contents):
             raise ValueError("Points and contents must be the same length")
 
@@ -131,28 +131,36 @@ class Point(BaseModel):
             _contents_to_embed = [
                 c for idx, c in enumerate(_contents) if idx not in _cache_hit
             ]
-            emb_res = openai_client.embeddings.create(
-                input=_contents_to_embed,
-                model=settings.EMBEDDING_MODEL,
-                dimensions=settings.EMBEDDING_DIMENSIONS,
-            )
-            for point, content, embedding in zip(
-                [pt for idx, pt in enumerate(batched_points) if idx not in _cache_hit],
-                _contents_to_embed,
-                emb_res.data,
-            ):
-                point.embedding = embedding.embedding
-                if cache is not None:
-                    cache.set(
-                        dvs.utils.cache.get_embedding_cache_key(content),
-                        embedding.embedding,
-                    )
+            if len(_contents_to_embed) > 0:
+                emb_res = openai_client.embeddings.create(
+                    input=_contents_to_embed,
+                    model=settings.EMBEDDING_MODEL,
+                    dimensions=settings.EMBEDDING_DIMENSIONS,
+                )
+                for point, content, embedding in zip(
+                    [
+                        pt
+                        for idx, pt in enumerate(batched_points)
+                        if idx not in _cache_hit
+                    ],
+                    _contents_to_embed,
+                    emb_res.data,
+                ):
+                    point.embedding = embedding.embedding
+                    if cache is not None:
+                        cache.set(
+                            dvs.utils.cache.get_embedding_cache_key(content),
+                            embedding.embedding,
+                        )
 
+        output = list(points)
+        if any(pt.is_embedded is False for pt in output):
+            raise ValueError("Not all points were embedded, it is programmer error")
         if debug is True:
-            console.print(f"Created {len(points)} embeddings")
+            console.print(f"Created {len(output)} embeddings")
             if cache is not None:
-                console.print(f"Cache hits: {cache_hits_count} / {len(points)}")
-        return points
+                console.print(f"Cache hits: {cache_hits_count} / {len(output)}")
+        return output
 
     @property
     def is_embedded(self) -> bool:

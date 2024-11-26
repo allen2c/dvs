@@ -99,6 +99,8 @@ class Document(BaseModel):
     ) -> List["Point"]:
         """"""
 
+        from dvs.types.point import Point
+
         self.strip()
         _meta = json.loads(json.dumps(metadata or {}, default=str))
         _pt_data = {
