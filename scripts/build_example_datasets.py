@@ -4,16 +4,23 @@
 import asyncio
 import zipfile
 from pathlib import Path
-from typing import Generator
+from typing import Generator, List
 
+import diskcache
 import httpx
+from openai import OpenAI
 from tqdm import tqdm
 
-from dvs.config import console
+from dvs.config import console, settings
 from dvs.types.document import Document
+from dvs.types.point import Point
 
 DOWNLOAD_DIR = Path("./downloads").resolve()
 TARGET_DIR = Path("./data").resolve()
+
+
+openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+cache = diskcache.Cache(settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT)
 
 
 async def download_bbc_news_dataset() -> Path:
@@ -68,6 +75,14 @@ async def main():
     ]
     console.print(f"Parsed {len(docs)} documents")
     console.print(docs[0])
+
+    points: List[Point] = [pt for doc in docs for pt in doc.to_points()]
+    console.print(f"Created {len(points)} points")
+
+    points = Point.set_embeddings_from_contents(
+        points, docs, openai_client=openai_client, cache=cache, debug=True
+    )
+    console.print(f"Created {len(points)} embeddings")
 
 
 if __name__ == "__main__":
