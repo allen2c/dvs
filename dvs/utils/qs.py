@@ -1,6 +1,5 @@
 import json
 import time
-from textwrap import dedent
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -32,7 +31,9 @@ from dvs.utils.openapi import openapi_to_create_table_sql
 from dvs.utils.sql_stmts import (
     SQL_STMT_CREATE_EMBEDDING_INDEX,
     SQL_STMT_DROP_TABLE,
+    SQL_STMT_INSTALL_EXTENSIONS,
     SQL_STMT_REMOVE_OUTDATED_POINTS,
+    SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE,
     SQL_STMT_SHOW_TABLES,
 )
 
@@ -49,20 +50,12 @@ def show_tables(conn: "duckdb.DuckDBPyConnection") -> Tuple[Text, ...]:
 def install_extensions(
     conn: "duckdb.DuckDBPyConnection", *, debug: bool = False
 ) -> None:
-    sql_stmt = dedent(
-        """
-        INSTALL vss;
-        LOAD vss;
-        INSTALL json;
-        LOAD json;
-        """
-    ).strip()
     if debug:
         console.print(
             "\nInstalling extensions with SQL:\n"
-            + f"{DISPLAY_SQL_QUERY.format(sql=sql_stmt)}\n"
+            + f"{DISPLAY_SQL_QUERY.format(sql=SQL_STMT_INSTALL_EXTENSIONS)}\n"
         )
-    conn.sql(sql_stmt)
+    conn.sql(SQL_STMT_INSTALL_EXTENSIONS)
 
 
 class PointQuerySet:
@@ -109,12 +102,9 @@ class PointQuerySet:
             indexes=["document_id", "content_md5"],
         ).strip()
         create_table_sql = (
-            "INSTALL vss;\n"
-            + "LOAD vss;\n"
-            + "INSTALL json;\n"
-            + "LOAD json;\n"
+            SQL_STMT_INSTALL_EXTENSIONS
             + f"\n{create_table_sql}\n"
-            + "\nSET hnsw_enable_experimental_persistence = true;\n"  # Required for HNSW index  # noqa: E501
+            + f"\n{SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE}\n"  # Required for HNSW index  # noqa: E501
             + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
                 table_name=settings.POINTS_TABLE_NAME,
                 column_name="embedding",
@@ -146,11 +136,8 @@ class PointQuerySet:
         """"""
 
         sql_stmt = (
-            "INSTALL vss;\n"
-            + "LOAD vss;\n"
-            + "INSTALL json;\n"
-            + "LOAD json;\n"
-            + "SET hnsw_enable_experimental_persistence = true;\n"  # Required for HNSW index  # noqa: E501
+            SQL_STMT_INSTALL_EXTENSIONS
+            + f"\n{SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE}\n"  # Required for HNSW index  # noqa: E501
             + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
                 table_name=settings.POINTS_TABLE_NAME,
                 column_name="embedding",
@@ -257,13 +244,7 @@ class PointQuerySet:
             f"INSERT INTO {settings.POINTS_TABLE_NAME} ({columns_expr}) "
             + f"VALUES ({placeholders})"
         )
-        query = (
-            "INSTALL vss;\n"
-            + "LOAD vss;\n"
-            + "INSTALL json;\n"
-            + "LOAD json;\n"
-            + f"\n{query}\n"
-        )
+        query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
         if debug:
             _display_params = display_sql_parameters(parameters)
             console.print(

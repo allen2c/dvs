@@ -48,3 +48,31 @@ SQL_STMT_CREATE_EMBEDDING_INDEX: Final[Text] = (
     + "USING HNSW({column_name}) "
     + "WITH (metric = '{metric}');"  # You can choose 'l2sq' or 'ip' instead of 'cosine' if needed  # noqa: E501
 )
+
+# SQL Recreate embedding index
+SQL_STMT_RECREATE_EMBEDDING_INDEX: Final[Text] = dedent(
+    """
+    DROP INDEX index_name;
+    CREATE INDEX idx_{table_name}_{column_name} ON table_name USING HNSW (vector_column) WITH (metric = '{metric}');
+    """  # noqa: E501
+).strip()
+
+# SQL HNSW compact index
+SQL_STMT_HNSW_COMPACT_INDEX: Final[Text] = (
+    "PRAGMA hnsw_compact_index('idx_{table_name}_{column_name}');"
+)
+
+# SQL Install extensions
+SQL_STMT_INSTALL_EXTENSIONS: Final[Text] = dedent(
+    """
+    INSTALL vss;
+    LOAD vss;
+    INSTALL json;
+    LOAD json;
+    """
+).strip()
+
+# SQL Set HNSW experimental persistence
+SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE: Final[Text] = (
+    "SET hnsw_enable_experimental_persistence = true;"
+)
