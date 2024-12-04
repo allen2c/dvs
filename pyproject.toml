@@ -33,9 +33,11 @@ mkdocs-render-swagger-plugin = "*"
 neoteroi-mkdocs = "*"
 
 [tool.poetry.group.dev.dependencies]
-black = "*"
+black = { extras = ["jupyter"], version = "*" }
 faker = "*"
 isort = "*"
+matplotlib = "*"
+pandas = "*"
 poetry-plugin-export = "^1.6.0"
 pytest = "^8"
 pytest-asyncio = "*"
