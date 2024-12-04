@@ -124,10 +124,24 @@ class DVS:
 
         return output
 
-    def remove(self, doc_ids: Union[Text, List[Text]], *, debug: Optional[bool] = None):
+    def remove(
+        self,
+        doc_ids: Union[Text, Iterable[Text]],
+        *,
+        debug: Optional[bool] = None,
+    ) -> None:
         """"""
 
-        pass
+        debug = self.debug if debug is None else debug
+        doc_ids = [doc_ids] if isinstance(doc_ids, Text) else list(doc_ids)
+
+        for doc_id in doc_ids:
+            Document.objects.remove(doc_id, conn=self.conn, debug=debug)
+            Point.objects.remove_many(
+                document_ids=[doc_id], conn=self.conn, debug=debug
+            )
+
+        return None
 
     async def search(
         self,
