@@ -102,8 +102,7 @@ class DVS:
                     )
                 docs.append(doc)
 
-        # Create documents and points
-        docs = Document.objects.bulk_create(docs, conn=self.conn, debug=debug)
+        # Collect documents and points
         for doc in docs:
             points: List[Point] = doc.to_points()
             output.append((doc, points))
