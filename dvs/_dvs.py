@@ -1,5 +1,6 @@
+import time
 from pathlib import Path
-from typing import List, Optional, Text, Tuple, Union
+from typing import Iterable, List, Optional, Text, Tuple, Union
 
 import diskcache
 import duckdb
@@ -54,15 +55,55 @@ class DVS:
         )
 
     def add(
-        self, documents: List[Document], *, debug: Optional[bool] = None
+        self,
+        documents: Union[
+            Document,
+            Iterable[Document],
+            Text,
+            Iterable[Text],
+            Iterable[Union[Document, Text]],
+        ],
+        *,
+        debug: Optional[bool] = None,
     ) -> List[Tuple[Document, List[Point]]]:
         """"""
 
         debug = self.debug if debug is None else debug
         output: List[Tuple[Document, List[Point]]] = []
 
+        # Validate documents
+        if isinstance(documents, Text) or isinstance(documents, Document):
+            documents = [documents]
+        docs: List["Document"] = []
+        for idx, doc in enumerate(documents):
+            if isinstance(doc, Text):
+                doc = doc.strip()
+                if not doc:
+                    raise ValueError(f"Document [{idx}] content cannot be empty: {doc}")
+                doc = Document.model_validate(
+                    {
+                        "name": doc.split("\n")[0][:28],
+                        "content": doc,
+                        "content_md5": Document.hash_content(doc),
+                        "metadata": {
+                            "content_length": len(doc),
+                        },
+                        "created_at": int(time.time()),
+                        "updated_at": int(time.time()),
+                    }
+                )
+                doc = doc.strip()
+                docs.append(doc)
+            else:
+                doc = doc.strip()
+                if not doc.content.strip():
+                    raise ValueError(
+                        f"Document [{idx}] content cannot be empty: {doc.content}"
+                    )
+                docs.append(doc)
+
         # Create documents and points
-        docs = Document.objects.bulk_create(documents, conn=self.conn, debug=debug)
+        docs = Document.objects.bulk_create(docs, conn=self.conn, debug=debug)
         for doc in docs:
             points: List[Point] = doc.to_points()
             output.append((doc, points))
