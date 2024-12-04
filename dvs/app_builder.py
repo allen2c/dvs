@@ -4,8 +4,6 @@ from textwrap import dedent
 from typing import Dict, Text
 
 import duckdb
-import openai
-from diskcache import Cache
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
 
 import dvs.utils.vss as VSS
@@ -54,16 +52,12 @@ def init_app() -> FastAPI:
 
 def build_app_state(app: FastAPI) -> FastAPI:
     app.state.settings = app.extra["settings"] = settings
-    app.state.cache = app.extra["cache"] = Cache(
-        directory=settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT
-    )
+    app.state.cache = app.extra["cache"] = settings.cache
     # OpenAI client
     if settings.OPENAI_API_KEY is None:
         app.state.openai_client = app.extra["openai_client"] = None
     else:
-        app.state.openai_client = app.extra["openai_client"] = openai.OpenAI(
-            api_key=settings.OPENAI_API_KEY
-        )
+        app.state.openai_client = app.extra["openai_client"] = settings.openai_client
 
     return app
 

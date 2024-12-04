@@ -1,7 +1,9 @@
 import pathlib
 from typing import Literal, Optional, Text
 
-from pydantic import Field
+import diskcache
+import openai
+from pydantic import Field, PrivateAttr
 from pydantic_settings import BaseSettings
 from rich.console import Console
 
@@ -70,6 +72,24 @@ class Settings(BaseSettings):
         default=100 * 2**20,
         description="The maximum size of the embeddings cache in bytes. Default is 100MB.",  # noqa: E501
     )
+
+    # Properties
+    _openai_client: Optional[openai.OpenAI] = PrivateAttr(default=None)
+    _cache: Optional[diskcache.Cache] = PrivateAttr(default=None)
+
+    @property
+    def openai_client(self) -> openai.OpenAI:
+        if self._openai_client is None:
+            self._openai_client = openai.OpenAI(api_key=self.OPENAI_API_KEY)
+        return self._openai_client
+
+    @property
+    def cache(self) -> diskcache.Cache:
+        if self._cache is None:
+            self._cache = diskcache.Cache(
+                self.CACHE_PATH, size_limit=self.CACHE_SIZE_LIMIT
+            )
+        return self._cache
 
     def validate_variables(self):
         """

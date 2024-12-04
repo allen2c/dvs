@@ -26,10 +26,8 @@ class DVS:
     ):
         self._db_path = duckdb_path or Path(settings.DUCKDB_PATH)
         self.debug = debug
-        self.openai_client = openai_client or OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.cache = cache or diskcache.Cache(
-            settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT
-        )
+        self.openai_client = openai_client or settings.openai_client
+        self.cache = cache or settings.cache
 
         if touch:
             self.touch(raise_if_exists=raise_if_exists, debug=debug)

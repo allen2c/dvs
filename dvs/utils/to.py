@@ -159,3 +159,23 @@ def base64_to_vector(base64_str: Text) -> List[float]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid base64 string: {base64_str}",
         )
+
+
+def vector_to_base64(vector: List[float]) -> Text:
+    """
+    Convert a list of floats to a base64 encoded string.
+
+    This function takes a list of float values, converts it to a NumPy array of type float32,
+    and then encodes the byte representation of the array into a base64 string. This is useful
+    for transmitting or storing vector data in a compact format.
+
+    Examples
+    --------
+    >>> vector = [0.1, 0.2, 0.3]
+    >>> encoded = vector_to_base64(vector)
+    >>> print(encoded)
+    'AAECAwQ='
+    """  # noqa: E501
+
+    base64_bytes = base64.b64encode(np.array(vector, dtype=np.float32).tobytes())
+    return base64_bytes.decode("ascii")

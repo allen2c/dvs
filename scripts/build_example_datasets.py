@@ -6,10 +6,8 @@ import zipfile
 from pathlib import Path
 from typing import Generator, List
 
-import diskcache
 import duckdb
 import httpx
-from openai import OpenAI
 from rich.prompt import Confirm
 from tqdm import tqdm
 
@@ -35,8 +33,8 @@ if TARGET_DB_PATH.exists():
         exit()
 
 
-openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-cache = diskcache.Cache(settings.CACHE_PATH, size_limit=settings.CACHE_SIZE_LIMIT)
+openai_client = settings.openai_client
+cache = settings.cache
 
 
 async def download_bbc_news_dataset() -> Path:
