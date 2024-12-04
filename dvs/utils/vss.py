@@ -6,13 +6,14 @@ from typing import List, Optional, Text, Tuple
 import duckdb
 
 import dvs.utils.sql_stmts as SQL_STMTS
-from dvs.config import settings
+from dvs.config import console, settings
 from dvs.types.columns import (
     COLUMN_NAMES_WITH_EMBEDDING,
     COLUMN_NAMES_WITHOUT_EMBEDDING,
 )
 from dvs.types.document import Document
 from dvs.types.point import Point
+from dvs.utils.display import DISPLAY_SQL_QUERY
 
 
 async def vector_search(
@@ -24,6 +25,7 @@ async def vector_search(
     points_table_name: Text = settings.POINTS_TABLE_NAME,
     conn: "duckdb.DuckDBPyConnection",
     with_embedding: bool = True,
+    debug: bool = False,
 ) -> List[Tuple["Point", Optional["Document"], float]]:
     """
     Perform a vector similarity search in a DuckDB database.
@@ -101,6 +103,11 @@ async def vector_search(
         points_table_name=points_table_name,
     )
     params = [vector]
+    if debug:
+        console.print(
+            "\nPerforming vector similarity search with SQL:\n"
+            + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+        )
 
     # Fetch results
     result = await asyncio.to_thread(conn.execute, query, params)
