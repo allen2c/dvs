@@ -38,6 +38,12 @@ download-db:
 	chmod +x ./download_db.sh
 	./download_db.sh
 
+build-example-datasets:
+	PYTHONPATH=. python scripts/build_example_datasets.py
+
+build-example-datasets-poetry:
+	poetry run python scripts/build_example_datasets.py
+
 # Server
 run-server:
 	fastapi run dvs/app.py

@@ -68,6 +68,11 @@ sequenceDiagram
    git lfs pull --include="examples/documents.duckdb" && cp examples/documents.duckdb ./data/documents.duckdb
    ```
 
+   Or build example datasets from scratch:
+   ```shell
+   make build-example-datasets
+   ```
+
 ## Usage
 
 1. Start the FastAPI server:
