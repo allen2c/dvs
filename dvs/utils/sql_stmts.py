@@ -52,7 +52,7 @@ SQL_STMT_CREATE_EMBEDDING_INDEX: Final[Text] = (
 # SQL Recreate embedding index
 SQL_STMT_RECREATE_EMBEDDING_INDEX: Final[Text] = dedent(
     """
-    DROP INDEX index_name;
+    DROP INDEX idx_{table_name}_{column_name};
     CREATE INDEX idx_{table_name}_{column_name} ON table_name USING HNSW (vector_column) WITH (metric = '{metric}');
     """  # noqa: E501
 ).strip()
