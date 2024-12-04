@@ -176,7 +176,7 @@ def build_app() -> FastAPI:
         conn: duckdb.DuckDBPyConnection = Depends(
             lambda: duckdb.connect(settings.DUCKDB_PATH),
         ),
-        time_start: float = Depends(lambda: time.perf_counter()),
+        t0_api: float = Depends(lambda: time.perf_counter()),
     ) -> SearchResponse:
         """
         Perform a vector similarity search on the database.
@@ -195,7 +195,7 @@ def build_app() -> FastAPI:
             The search request object containing the query and search parameters.
         conn : duckdb.DuckDBPyConnection
             A connection to the DuckDB database.
-        time_start : float
+        t0_api : float
             The start time of the request processing, used for performance measurement.
 
         Returns
@@ -244,14 +244,17 @@ def build_app() -> FastAPI:
         """  # noqa: E501
 
         # Ensure vectors
+        t0_vec = time.perf_counter()
         vectors = await SearchRequest.to_vectors(
             [request],
             cache=app.state.cache,
             openai_client=app.state.openai_client,
         )
         vector = vectors[0]
+        t1_vec = time.perf_counter()
 
         # Search
+        t0_db = time.perf_counter()
         search_results = await VSS.vector_search(
             vector,
             top_k=request.top_k,
@@ -261,11 +264,14 @@ def build_app() -> FastAPI:
             conn=conn,
             with_embedding=request.with_embedding,
         )
+        t1_db = time.perf_counter()
 
         # Return results
-        time_end = time.perf_counter()
-        elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f}ms"
-        response.headers["X-Processing-Time"] = elapsed_time_ms_str
+        response.headers["Server-Timing"] = (
+            f"total;dur={(time.perf_counter() - t0_api) * 1000:.2f},"
+            f"vec;dur={(t1_vec - t0_vec) * 1000:.2f},"
+            f"db;dur={(t1_db - t0_db) * 1000:.2f}"
+        )
         return SearchResponse.from_search_results(search_results)
 
     @app.post("/bs", description="Abbreviation for /bulk_search")
@@ -299,7 +305,7 @@ def build_app() -> FastAPI:
                 },
             },
         ),
-        time_start: float = Depends(lambda: time.perf_counter()),
+        t0_api: float = Depends(lambda: time.perf_counter()),
     ) -> BulkSearchResponse:
         """
         Perform multiple vector similarity searches on the database in a single request.
@@ -316,7 +322,7 @@ def build_app() -> FastAPI:
             If True, prints debug information such as elapsed time (default is False).
         request : BulkSearchRequest
             The bulk search request object containing multiple queries and search parameters.
-        time_start : float
+        t0_api : float
             The start time of the request processing, used for performance measurement.
 
         Returns
@@ -385,13 +391,16 @@ def build_app() -> FastAPI:
             )
 
         # Ensure vectors
+        t0_vec = time.perf_counter()
         vectors = await SearchRequest.to_vectors(
             request.queries,
             cache=app.state.cache,
             openai_client=app.state.openai_client,
         )
+        t1_vec = time.perf_counter()
 
         # Search
+        t0_db = time.perf_counter()
         bulk_search_results = await asyncio.gather(
             *[
                 VSS.vector_search(
@@ -406,11 +415,15 @@ def build_app() -> FastAPI:
                 for vector, req_query in zip(vectors, request.queries)
             ]
         )
+        t1_db = time.perf_counter()
 
         # Return results
-        time_end = time.perf_counter()
-        elapsed_time_ms_str = f"{(time_end - time_start) * 1000:.2f}ms"
-        response.headers["X-Processing-Time"] = elapsed_time_ms_str
+        t1_api = time.perf_counter()
+        response.headers["Server-Timing"] = (
+            f"total;dur={(t1_api - t0_api) * 1000:.2f},"
+            f"vec;dur={(t1_vec - t0_vec) * 1000:.2f},"
+            f"db;dur={(t1_db - t0_db) * 1000:.2f}"
+        )
         return BulkSearchResponse.from_bulk_search_results(bulk_search_results)
 
     return app
