@@ -19,7 +19,10 @@ from dvs.types.document import Document
 from dvs.types.point import Point
 
 DOWNLOAD_DIR = Path("./downloads").resolve()
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 TARGET_DIR = Path("./data").resolve()
+TARGET_DIR.mkdir(parents=True, exist_ok=True)
 TARGET_DB_PATH = Path(settings.DUCKDB_PATH).resolve()
 
 if TARGET_DB_PATH.exists():

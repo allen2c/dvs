@@ -19,9 +19,11 @@ import duckdb
 import httpx
 import jinja2
 from openai import APIStatusError, ConflictError, NotFoundError
+from tqdm import tqdm
 
 from dvs.config import console, settings
 from dvs.types.paginations import Pagination
+from dvs.utils.chunk import chunks
 from dvs.utils.display import (
     DISPLAY_SQL_PARAMS,
     DISPLAY_SQL_QUERY,
@@ -215,6 +217,7 @@ class PointQuerySet:
         ],
         *,
         conn: "duckdb.DuckDBPyConnection",
+        batch_size: int = 20,
         debug: bool = False,
     ) -> List["Point"]:
         """"""
@@ -236,25 +239,40 @@ class PointQuerySet:
         columns = list(points[0].model_json_schema()["properties"].keys())
         columns_expr = ", ".join(columns)
         placeholders = ", ".join(["?" for _ in columns])
-        parameters: List[Tuple[Any, ...]] = []
-        for pt in points:
-            parameters.append(tuple([getattr(pt, c) for c in columns]))
 
-        query = (
-            f"INSERT INTO {settings.POINTS_TABLE_NAME} ({columns_expr}) "
-            + f"VALUES ({placeholders})"
-        )
-        query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
-        if debug:
-            _display_params = display_sql_parameters(parameters)
-            console.print(
-                "\nCreating points with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}\n"
+        # Paginate points creation
+        _iter_batch_pts = (
+            tqdm(
+                chunks(points, batch_size=batch_size),
+                total=len(points) // batch_size
+                + (1 if len(points) % batch_size else 0),
+                desc="Creating points",
             )
+            if debug
+            else chunks(points, batch_size=batch_size)
+        )
+        _shown_debug = False
+        for _batch_pts in _iter_batch_pts:
+            parameters: List[Tuple[Any, ...]] = []
+            for pt in _batch_pts:
+                parameters.append(tuple([getattr(pt, c) for c in columns]))
 
-        # Create points
-        conn.executemany(query, parameters)
+            query = (
+                f"INSERT INTO {settings.POINTS_TABLE_NAME} ({columns_expr}) "
+                + f"VALUES ({placeholders})"
+            )
+            query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
+            if debug and not _shown_debug:
+                _display_params = display_sql_parameters(parameters)
+                console.print(
+                    "\nCreating points with SQL:\n"
+                    + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+                    + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}\n"
+                )
+                _shown_debug = True
+
+            # Create points
+            conn.executemany(query, parameters)
 
         if time_start is not None:
             time_end = time.perf_counter()
