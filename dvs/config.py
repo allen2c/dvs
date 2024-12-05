@@ -112,6 +112,8 @@ class Settings(BaseSettings):
         Validate the variables in the settings.
         """
 
+        print("validating variables")
+
         # Validate DuckDB path
         if not pathlib.Path(self.DUCKDB_PATH).exists():
             self.APP_READY = False
