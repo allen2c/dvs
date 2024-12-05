@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal, Optional, Text
 
 import diskcache
+import duckdb
 import openai
 from pydantic import Field, PrivateAttr, SecretStr
 from pydantic_settings import BaseSettings
@@ -101,6 +102,10 @@ class Settings(BaseSettings):
                 self.CACHE_PATH, size_limit=self.CACHE_SIZE_LIMIT
             )
         return self._cache
+
+    @property
+    def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
+        return duckdb.connect(self.DUCKDB_PATH)
 
     def validate_variables(self):
         """

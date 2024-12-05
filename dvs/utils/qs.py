@@ -16,7 +16,6 @@ from typing import (
 )
 
 import duckdb
-import httpx
 import jinja2
 from openai import APIStatusError, ConflictError, NotFoundError
 from tqdm import tqdm
@@ -29,6 +28,7 @@ from dvs.utils.display import (
     DISPLAY_SQL_QUERY,
     display_sql_parameters,
 )
+from dvs.utils.dummies import dummy_httpx_response
 from dvs.utils.openapi import openapi_to_create_table_sql
 from dvs.utils.sql_stmts import (
     SQL_STMT_CREATE_EMBEDDING_INDEX,
@@ -117,7 +117,7 @@ class PointQuerySet:
         ):
             raise ConflictError(
                 f"Table '{settings.POINTS_TABLE_NAME}' already exists.",
-                response=httpx.Response(status_code=409),
+                response=dummy_httpx_response(409, b"Conflict"),
                 body=None,
             )
 
@@ -270,7 +270,7 @@ class PointQuerySet:
         if result is None:
             raise NotFoundError(
                 f"Point with ID '{point_id}' not found.",
-                response=httpx.Response(status_code=404),
+                response=dummy_httpx_response(404, b"Not Found"),
                 body=None,
             )
 
@@ -442,7 +442,7 @@ class PointQuerySet:
 
         raise APIStatusError(
             "Updating points is not supported.",
-            response=httpx.Response(status_code=501),
+            response=dummy_httpx_response(501, b"Not Implemented"),
             body=None,
         )
 
@@ -960,7 +960,7 @@ class DocumentQuerySet:
         ):
             raise ConflictError(
                 f"Table '{settings.DOCUMENTS_TABLE_NAME}' already exists.",
-                response=httpx.Response(status_code=409),
+                response=dummy_httpx_response(409, b"Conflict"),
                 body=None,
             )
 
@@ -1049,7 +1049,7 @@ class DocumentQuerySet:
         if result is None:
             raise NotFoundError(
                 f"Document with ID '{document_id}' not found.",
-                response=httpx.Response(status_code=404),
+                response=dummy_httpx_response(404, b"Not Found"),
                 body=None,
             )
 
@@ -1213,7 +1213,7 @@ class DocumentQuerySet:
             if existing_doc:
                 raise ConflictError(
                     f"The name '{name}' is already used by another document.",
-                    response=httpx.Response(status_code=409),
+                    response=dummy_httpx_response(409, b"Conflict"),
                     body=None,
                 )
 
@@ -1221,7 +1221,7 @@ class DocumentQuerySet:
         if document is None:
             raise NotFoundError(
                 f"Document with ID '{document_id}' not found.",
-                response=httpx.Response(status_code=404),
+                response=dummy_httpx_response(404, b"Not Found"),
                 body=None,
             )
 

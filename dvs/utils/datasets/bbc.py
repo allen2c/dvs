@@ -1,8 +1,9 @@
 import zipfile
 from pathlib import Path
-from typing import Generator, List, Text
+from typing import Generator, List, Optional, Text
 
 import requests
+from rich.prompt import Confirm
 from tqdm import tqdm
 
 from dvs.config import console, settings
@@ -16,13 +17,16 @@ def download_documents(
     url: Text = URL_BBC_NEWS_DATASET,
     download_dirpath: Text | Path = settings._temp_dir,
     target_dirpath: Text | Path = settings.APP_DATA_DIR,
+    overwrite: Optional[bool] = None,
 ) -> List[Document]:
     download_dirpath = Path(download_dirpath).resolve()
     download_dirpath.mkdir(parents=True, exist_ok=True)
     target_dirpath = Path(target_dirpath).resolve()
     target_dirpath.mkdir(parents=True, exist_ok=True)
 
-    zip_path = download_bbc_news_dataset(url=url, download_dirpath=download_dirpath)
+    zip_path = download_bbc_news_dataset(
+        url=url, download_dirpath=download_dirpath, overwrite=overwrite
+    )
     unzip_bbc_news_dataset(zip_path, target_dirpath=target_dirpath)
     docs = [
         parse_bbc_news_document(path)
@@ -36,15 +40,38 @@ def download_documents(
 
 
 def download_bbc_news_dataset(
-    url: Text = URL_BBC_NEWS_DATASET, download_dirpath: Text | Path = settings._temp_dir
+    url: Text = URL_BBC_NEWS_DATASET,
+    download_dirpath: Text | Path = settings._temp_dir,
+    overwrite: Optional[bool] = None,
 ) -> Path:
     download_filepath = Path(download_dirpath) / "bbc-fulltext.zip"
     if download_filepath.exists():
-        return download_filepath
+        if overwrite is None:
+            overwrite = Confirm.ask(
+                f"File already exists: {download_filepath}. Overwrite?"
+            )
+        if not overwrite:
+            return download_filepath
 
-    response = requests.get(url)
+    # Stream the download with progress bar
+    response = requests.get(url, stream=True)
     response.raise_for_status()
-    download_filepath.write_bytes(response.content)
+
+    # Get total file size from headers
+    total_size = int(response.headers.get("content-length", 0))
+
+    # Setup progress bar
+    progress = tqdm(
+        total=total_size, unit="iB", unit_scale=True, desc="Downloading BBC dataset"
+    )
+
+    # Download with chunks and update progress
+    with open(download_filepath, "wb") as file:
+        for data in response.iter_content(chunk_size=1024):
+            size = file.write(data)
+            progress.update(size)
+    progress.close()
+
     return download_filepath
 
 
