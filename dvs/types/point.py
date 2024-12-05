@@ -81,9 +81,9 @@ class Point(BaseModel):
         points: Sequence["Point"],
         contents: Sequence[Text] | Sequence["Document"],
         *,
-        openai_client: "OpenAI",
+        openai_client: "OpenAI" = settings.openai_client,
         batch_size: int = 500,
-        cache: Optional["diskcache.Cache"] = None,
+        cache: Optional["diskcache.Cache"] = settings.cache,
         debug: bool = False,
     ) -> List["Point"]:
         if len(points) != len(contents):

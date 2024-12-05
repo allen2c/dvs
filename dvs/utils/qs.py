@@ -29,6 +29,7 @@ from dvs.utils.display import (
     display_sql_parameters,
 )
 from dvs.utils.dummies import dummy_httpx_response
+from dvs.utils.ensure import ensure_dict
 from dvs.utils.openapi import openapi_to_create_table_sql
 from dvs.utils.sql_stmts import (
     SQL_STMT_CREATE_EMBEDDING_INDEX,
@@ -275,6 +276,7 @@ class PointQuerySet:
             )
 
         data = dict(zip([c for c in columns], result))
+        data["metadata"] = ensure_dict(data.get("metadata", None))
         out = self.model.model_validate(data)
 
         if time_start is not None:
@@ -477,7 +479,10 @@ class PointQuerySet:
 
         time_start = time.perf_counter() if debug else None
 
-        query = f"DELETE FROM {settings.POINTS_TABLE_NAME} WHERE point_id = ?"
+        query = (
+            SQL_STMT_INSTALL_EXTENSIONS
+            + f"\nDELETE FROM {settings.POINTS_TABLE_NAME} WHERE point_id = ?"
+        )
         parameters = [point_id]
         if debug:
             console.print(
