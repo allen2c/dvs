@@ -10,6 +10,24 @@ from dvs.types.document import Document
 
 @pytest.mark.asyncio
 async def test_dvs(documents: typing.List[Document]):
+    """
+    Integration test for the DVS (DuckDB Vector Similarity Search) client's core operations.
+
+    This test verifies the complete workflow of the DVS client, including document
+    addition, vector similarity search, and document removal. It ensures proper
+    functionality of the vector database operations and data integrity throughout
+    the process.
+
+    Notes
+    -----
+    - The test automatically cleans up any existing database file before running
+    - Uses a fixture of BBC news documents for testing
+    - Verifies document and point creation with proper ID assignments
+    - Tests vector similarity search functionality with text queries
+    - Confirms proper document removal and search result updates
+    - All operations are performed with debug mode enabled for visibility
+    """  # noqa: E501
+
     pathlib.Path(settings.DUCKDB_PATH).unlink(missing_ok=True)  # clean up
 
     # Initialize DVS

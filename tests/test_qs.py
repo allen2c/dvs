@@ -10,6 +10,22 @@ from dvs.types.point import Point
 
 
 def test_documents_qs(documents: typing.List[Document]):
+    """
+    Test the Document QuerySet (qs) functionality for CRUD operations in DuckDB.
+
+    This test function verifies all core database operations for documents including:
+    table creation, single/bulk document creation, retrieval, listing, counting,
+    and deletion. It ensures the Document QuerySet properly handles database
+    interactions and maintains data integrity.
+
+    Notes
+    -----
+    - The test automatically cleans up any existing database file before running
+    - Uses the BBC news dataset fixture for test documents
+    - All operations are performed with debug mode enabled for visibility
+    - Verifies proper error handling for non-existent documents
+    """
+
     pathlib.Path(settings.DUCKDB_PATH).unlink(missing_ok=True)  # clean up
 
     # Touch
@@ -62,6 +78,23 @@ def test_documents_qs(documents: typing.List[Document]):
 
 
 def test_points_qs(documents: typing.List[Document]):
+    """
+    Test the Point QuerySet (qs) functionality for CRUD operations in DuckDB.
+
+    This test function verifies all core database operations for points including:
+    table creation, single/bulk point creation, retrieval, listing, counting,
+    and deletion. It ensures the Point QuerySet properly handles database
+    interactions and maintains data integrity.
+
+    Notes
+    -----
+    - The test automatically cleans up any existing database file before running
+    - Uses the BBC news dataset fixture for test documents
+    - Points are created with embeddings from document content
+    - All operations are performed with debug mode enabled for visibility
+    - Verifies proper error handling for non-existent points
+    """
+
     pathlib.Path(settings.DUCKDB_PATH).unlink(missing_ok=True)  # clean up
 
     # Touch
