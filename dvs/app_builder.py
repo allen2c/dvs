@@ -1,7 +1,6 @@
 import asyncio
 import time
 from textwrap import dedent
-from typing import Dict, Text
 
 import duckdb
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
@@ -10,6 +9,7 @@ import dvs.utils.vss as VSS
 from dvs.config import settings
 from dvs.types.bulk_search_request import BulkSearchRequest
 from dvs.types.bulk_search_response import BulkSearchResponse
+from dvs.types.health_response import HealthResponse
 from dvs.types.search_request import SearchRequest
 from dvs.types.search_response import SearchResponse
 
@@ -82,9 +82,16 @@ def build_app() -> FastAPI:
 
     # API endpoints
     @app.get(
-        "/", description="Root endpoint providing API status and basic information"
+        "/health",
+        summary="API health check endpoint",
+        description="API health check endpoint",
     )
-    async def api_root() -> Dict[Text, Text]:
+    @app.get(
+        "/",
+        summary="Root endpoint providing API status and basic information",
+        description="Root endpoint providing API status and basic information",
+    )
+    async def api_root() -> HealthResponse:
         """
         Root endpoint for the DuckDB Vector Similarity Search (VSS) API.
 
@@ -94,7 +101,7 @@ def build_app() -> FastAPI:
 
         Returns
         -------
-        dict
+        HealthResponse
             A dictionary containing status information and API details.
             {
                 "status": str
@@ -130,16 +137,24 @@ def build_app() -> FastAPI:
         }
         """
 
-        return {
-            "status": "ok",
-            "version": settings.APP_VERSION,
-            "name": settings.APP_NAME,
-            "description": "Vector Similarity Search API powered by DuckDB",
-        }
+        return HealthResponse.model_validate(
+            {
+                "status": "ok",
+                "version": settings.APP_VERSION,
+                "name": settings.APP_NAME,
+                "description": "Vector Similarity Search API powered by DuckDB",
+            }
+        )
 
-    @app.post("/s", description="Abbreviation for /search")
     @app.post(
-        "/search", description="Perform a vector similarity search on the database"
+        "/s",
+        summary="Abbreviation for /search",
+        description="Abbreviation for /search",
+    )
+    @app.post(
+        "/search",
+        summary="Perform a vector similarity search on the database",
+        description="Perform a vector similarity search on the database",
     )
     async def api_search(
         response: Response,
@@ -267,9 +282,14 @@ def build_app() -> FastAPI:
         )
         return SearchResponse.from_search_results(search_results)
 
-    @app.post("/bs", description="Abbreviation for /bulk_search")
+    @app.post(
+        "/bs",
+        summary="Abbreviation for /bulk_search",
+        description="Abbreviation for /bulk_search",
+    )
     @app.post(
         "/bulk_search",
+        summary="Perform multiple vector similarity searches in a single request",
         description="Perform multiple vector similarity searches in a single request",
     )
     async def api_bulk_search(
