@@ -887,7 +887,10 @@ class PointQuerySet:
 
         time_start = time.perf_counter() if debug else None
 
-        query = f"DELETE FROM {settings.POINTS_TABLE_NAME}\n"
+        query = (
+            SQL_STMT_INSTALL_EXTENSIONS
+            + f"\nDELETE FROM {settings.POINTS_TABLE_NAME}\n"
+        )
         where_clauses: List[Text] = []
         parameters: List[Text] = []
 
