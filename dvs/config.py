@@ -1,4 +1,6 @@
 import pathlib
+import tempfile
+from pathlib import Path
 from typing import Literal, Optional, Text
 
 import diskcache
@@ -33,6 +35,10 @@ class Settings(BaseSettings):
     APP_READY: bool = Field(
         default=False,
         description="Whether the application is ready to serve requests.",
+    )
+    APP_DATA_DIR: Text = Field(
+        default="./data",
+        description="The directory where the application stores data.",
     )
 
     # DuckDB
@@ -76,6 +82,7 @@ class Settings(BaseSettings):
     # Properties
     _openai_client: Optional[openai.OpenAI] = PrivateAttr(default=None)
     _cache: Optional[diskcache.Cache] = PrivateAttr(default=None)
+    _temp_dir: Path = PrivateAttr(default=Path(tempfile.gettempdir()).joinpath(".dvs"))
 
     @property
     def openai_client(self) -> openai.OpenAI:
@@ -100,11 +107,20 @@ class Settings(BaseSettings):
         Validate the variables in the settings.
         """
 
+        # Validate DuckDB path
         if not pathlib.Path(self.DUCKDB_PATH).exists():
             self.APP_READY = False
         else:
             self.DUCKDB_PATH = str(pathlib.Path(self.DUCKDB_PATH).resolve())
             self.APP_READY = True
+
+        # Validate temp directory
+        self._temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Validate app data directory
+        _data_dir = pathlib.Path(self.APP_DATA_DIR).resolve()
+        _data_dir.mkdir(parents=True, exist_ok=True)
+        self.APP_DATA_DIR = str(_data_dir)
 
 
 settings = Settings()
