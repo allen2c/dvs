@@ -998,9 +998,8 @@ class DocumentQuerySet:
         document_id: Text,
         *,
         conn: "duckdb.DuckDBPyConnection",
-        with_embedding: bool = False,
         debug: bool = False,
-    ) -> Optional["Document"]:
+    ) -> "Document":
         """
         Retrieve a document from the DuckDB database by its ID.
 
@@ -1020,7 +1019,6 @@ class DocumentQuerySet:
         >>> document = Document.objects.retrieve(
         ...     document_id='doc_123',
         ...     conn=conn,
-        ...     with_embedding=True,
         ...     debug=True
         ... )
         """
@@ -1028,8 +1026,7 @@ class DocumentQuerySet:
         time_start = time.perf_counter() if debug else None
 
         columns = list(self.model.model_json_schema()["properties"].keys())
-        if not with_embedding:
-            columns = [c for c in columns if c != "embedding"]
+        columns = [c for c in columns if c != "embedding"]
         columns_expr = ",".join(columns)
 
         query = (
@@ -1118,6 +1115,9 @@ class DocumentQuerySet:
         - The execution time is printed in seconds if it exceeds one second, otherwise in milliseconds.
         - The function returns the list of documents that were inserted.
         """  # noqa: E501
+
+        if not documents:
+            return []
 
         time_start = time.perf_counter() if debug else None
 
@@ -1406,6 +1406,57 @@ class DocumentQuerySet:
             time_elapsed = (time_end - time_start) * 1000
             console.print(f"Listed documents in {time_elapsed:.3f} ms")
         return out
+
+    def gen(
+        self,
+        *,
+        after: Optional[Text] = None,
+        before: Optional[Text] = None,
+        limit: int = 20,
+        order: Literal["asc", "desc"] = "asc",
+        conn: "duckdb.DuckDBPyConnection",
+        with_embedding: bool = False,
+        debug: bool = False,
+    ) -> Generator["Document", None, None]:
+        """
+        Generate and yield documents from the DuckDB database with pagination support.
+
+        A generator wrapper around the list() method that handles pagination automatically,
+        yielding individual documents until all matching records have been retrieved. This is
+        useful for processing large result sets without loading all documents into memory at once.
+
+        Notes
+        -----
+        - Automatically handles pagination using cursor-based pagination with document_id
+        - Memory efficient as it yields documents one at a time
+        - Maintains the same filtering and ordering capabilities as the list() method
+
+        Examples
+        --------
+        >>> conn = duckdb.connect('database.duckdb')
+        >>> for document in Document.objects.gen(
+        ...     limit=100,
+        ...     conn=conn,
+        ...     debug=True
+        ... ):
+        ...     process_document(document)
+        """  # noqa: E501
+
+        has_more = True
+        current_after = after
+        while has_more:
+            documents = self.list(
+                after=current_after,
+                before=before,
+                limit=limit,
+                order=order,
+                conn=conn,
+                debug=debug,
+            )
+            has_more = documents.has_more
+            current_after = documents.last_id
+            for doc in documents.data:
+                yield doc
 
     def count(
         self,
