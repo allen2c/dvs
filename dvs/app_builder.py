@@ -54,10 +54,9 @@ def build_app_state(app: FastAPI) -> FastAPI:
     app.state.settings = app.extra["settings"] = settings
     app.state.cache = app.extra["cache"] = settings.cache
     # OpenAI client
-    if settings.OPENAI_API_KEY is None:
-        app.state.openai_client = app.extra["openai_client"] = None
-    else:
-        app.state.openai_client = app.extra["openai_client"] = settings.openai_client
+    app.state.openai_client = app.extra["openai_client"] = (
+        settings.openai_client if settings.OPENAI_API_KEY is not None else None
+    )
 
     return app
 

@@ -3,7 +3,7 @@ from typing import Literal, Optional, Text
 
 import diskcache
 import openai
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, SecretStr
 from pydantic_settings import BaseSettings
 from rich.console import Console
 
@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     )
 
     # OpenAI
-    OPENAI_API_KEY: Optional[Text] = Field(
+    OPENAI_API_KEY: Optional[SecretStr] = Field(
         default=None,
         description="The API key for authenticating with OpenAI services. If not provided, OpenAI features will be disabled.",  # noqa: E501
     )
@@ -80,7 +80,11 @@ class Settings(BaseSettings):
     @property
     def openai_client(self) -> openai.OpenAI:
         if self._openai_client is None:
-            self._openai_client = openai.OpenAI(api_key=self.OPENAI_API_KEY)
+            if self.OPENAI_API_KEY is None:
+                raise ValueError("OPENAI_API_KEY is not set")
+            self._openai_client = openai.OpenAI(
+                api_key=self.OPENAI_API_KEY.get_secret_value()
+            )
         return self._openai_client
 
     @property
