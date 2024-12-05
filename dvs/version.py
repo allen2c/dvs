@@ -1,3 +1,6 @@
-from typing import Final, Text
+import pathlib
+import typing
 
-VERSION: Final[Text] = "0.3.0"
+VERSION: typing.Final[typing.Text] = (
+    pathlib.Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
+)

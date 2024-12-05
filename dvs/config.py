@@ -26,7 +26,11 @@ class Settings(BaseSettings):
         description="The name of the application. Used for identification and logging purposes.",  # noqa: E501
     )
     APP_VERSION: Text = Field(
-        default="0.1.0",
+        default=pathlib.Path(__file__)
+        .resolve()
+        .parent.joinpath("VERSION")
+        .read_text()
+        .strip(),
         description="The version of the application. Follows semantic versioning.",
     )
     APP_ENV: Literal["development", "production", "test"] = Field(
@@ -111,8 +115,6 @@ class Settings(BaseSettings):
         """
         Validate the variables in the settings.
         """
-
-        print("validating variables")
 
         # Validate DuckDB path
         if not pathlib.Path(self.DUCKDB_PATH).exists():
