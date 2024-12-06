@@ -1,11 +1,11 @@
 [tool.poetry]
-authors = ["Allen Chou <f1470891079@gmail.com>"]
-description = "Deploy simple vector similarity search service by duckdb."
+authors = ["allen2c <f1470891079@gmail.com>"]
+description = "Deploy simple vector similarity search service by DuckDB."
 license = "MIT"
 name = "dvs-py"
 packages = [{ include = "dvs" }]
 readme = "README.md"
-version = "0.3.0"
+version = "0.4.0"
 
 [tool.poetry.dependencies]
 diskcache = "*"
