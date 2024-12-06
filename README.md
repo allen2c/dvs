@@ -2,6 +2,14 @@
 
 A high-performance vector similarity search API powered by DuckDB and OpenAI embeddings.
 
+---
+
+**Documentation**: <a href="https://allen2c.github.io/dvs/" target="_blank">https://allen2c.github.io/dvs/</a>
+
+**Source Code**: <a href="https://github.com/allen2c/dvs" target="_blank">https://github.com/allen2c/dvs</a>
+
+---
+
 ## Overview
 
 DVS (DuckDB-VSS-API) is a FastAPI-based web service that provides efficient vector similarity search capabilities using DuckDB as the backend database and OpenAI's embedding models for vector representation. This project is designed for applications requiring fast similarity search capabilities, such as recommendation systems, semantic search engines, and content discovery platforms.

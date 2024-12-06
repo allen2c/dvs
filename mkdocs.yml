@@ -1,4 +1,17 @@
 site_name: DVS
-site_url: https://github.com/allen2c/dvs
+
+repo_name: dvs
+repo_url: https://github.com/allen2c/dvs
+site_author: allen2c
+site_description: A high-performance vector similarity search API powered by DuckDB and OpenAI embeddings.
+site_url: https://allen2c.github.io/dvs/
+
 theme:
   name: material
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
