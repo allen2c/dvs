@@ -6,8 +6,9 @@ from diskcache import Cache
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
+import dvs.utils.is_ as IS
 import dvs.utils.to as TO
-from dvs.config import settings
+from dvs.config import logger, settings
 from dvs.types.encoding_type import EncodingType
 
 
@@ -145,14 +146,19 @@ class SearchRequest(BaseModel):
         required_emb_items: OrderedDict[int, Text] = OrderedDict()
 
         for idx, search_request in enumerate(search_requests):
+            # Handle empty queries
             if not search_request.query:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid queries[{idx}].",
                 )
+
+            # Handle text queries
             if isinstance(search_request.query, Text):
+                # Query is hint for base64 encoding
                 if search_request.encoding == EncodingType.BASE64:
                     output_vectors[idx] = TO.base64_to_vector(search_request.query)
+                # Query is hint for vector, but query is not array, raise error
                 elif search_request.encoding == EncodingType.VECTOR:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -161,8 +167,20 @@ class SearchRequest(BaseModel):
                             + f"queries[{idx}].query."
                         ),
                     )
-                else:
+                # Query is hint for plaintext, need to convert to vector
+                elif search_request.encoding is EncodingType.PLAINTEXT:
                     required_emb_items[idx] = search_request.query
+                # Query is provided as string, but no encoding hint
+                else:
+                    # Try to decode as base64.
+                    # If it can be decoded as base64, use it as a vector in high priority.  # noqa: E501
+                    if IS.is_base64(search_request.query):
+                        logger.debug(f"Probing queries[{idx}].query as base64 encoded.")
+                        output_vectors[idx] = TO.base64_to_vector(search_request.query)
+                    else:
+                        required_emb_items[idx] = search_request.query
+
+            # Handle vectors
             else:
                 output_vectors[idx] = search_request.query
 
