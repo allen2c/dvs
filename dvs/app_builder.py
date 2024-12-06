@@ -5,6 +5,7 @@ from textwrap import dedent
 import duckdb
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
 
+import dvs.utils.logger as LOGGER
 import dvs.utils.vss as VSS
 from dvs.config import settings
 from dvs.types.bulk_search_request import BulkSearchRequest
@@ -73,6 +74,9 @@ def build_app_resources(app: FastAPI) -> FastAPI:
 
 
 def build_app() -> FastAPI:
+    logger = LOGGER.setup_logger(settings.APP_NAME)
+    logger.debug("Building application ...")
+
     # FastAPI app
     app = init_app()
     # FastAPI app state

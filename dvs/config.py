@@ -1,3 +1,4 @@
+import logging
 import pathlib
 import tempfile
 from pathlib import Path
@@ -134,3 +135,6 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.validate_variables()
+logger = logging.getLogger(settings.APP_NAME)
+uvicorn_error_logger = logging.getLogger("uvicorn.error")
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
