@@ -8,6 +8,7 @@ import dvs.app
 import dvs.utils.to as TO
 from dvs import DVS
 from dvs.config import console, fake, settings
+from dvs.types.bulk_search_response import BulkSearchResponse
 from dvs.types.document import Document
 from dvs.types.search_response import SearchResponse
 
@@ -64,3 +65,18 @@ def test_search(fastapi_client: TestClient, search_request: typing.Dict):
     response.raise_for_status()
     search_response = SearchResponse.model_validate(response.json())
     assert len(search_response.results) > 0
+
+
+@pytest.mark.parametrize(
+    "bulk_search_request",
+    [
+        {"queries": [{"query": "test"}, {"query": TO.vector_to_base64(test_vector)}]},
+    ],
+)
+def test_bulk_search(fastapi_client: TestClient, bulk_search_request: typing.Dict):
+    response = fastapi_client.post("/bulk_search", json=bulk_search_request)
+    if response.status_code >= 300:
+        console.print(f"[{response.status_code}] {response.text}", style="red")
+    response.raise_for_status()
+    bulk_search_response = BulkSearchResponse.model_validate(response.json())
+    assert len(bulk_search_response.results) == len(bulk_search_request["queries"])
