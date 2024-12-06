@@ -16,7 +16,7 @@ from dvs.types.search_request import SearchRequest
 class DVS:
     def __init__(
         self,
-        duckdb_path: Optional[Path] = None,
+        duckdb_path: Optional[Union[Path, Text]] = None,
         *,
         touch: bool = True,
         raise_if_exists: bool = False,
@@ -24,7 +24,7 @@ class DVS:
         openai_client: Optional["OpenAI"] = None,
         cache: Optional["diskcache.Cache"] = None,
     ):
-        self._db_path = duckdb_path or Path(settings.DUCKDB_PATH)
+        self._db_path = Path(duckdb_path or settings.DUCKDB_PATH)
         self.debug = debug
         self.openai_client = openai_client or settings.openai_client
         self.cache = cache or settings.cache

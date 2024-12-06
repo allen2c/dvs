@@ -47,11 +47,109 @@ sequenceDiagram
 
 ## Usage
 
+### Build database from scratch
+
+```python
+import asyncio
+import tempfile
+
+from rich import print
+
+from dvs import DVS
+from dvs.types.document import Document
+
+dvs = DVS(tempfile.NamedTemporaryFile(suffix=".duckdb").name)
+
+# Add document to the database
+dvs.add(
+    """
+    Apple has announced new features for its upcoming iPhone, including an upgraded camera system and a new A16 chip for faster processing. The introduction of "Focus Mode" will allow users to customize notifications based on their activities.
+    """.strip()  # noqa: E501
+)
+# Bulk add documents to the database
+dvs.add(
+    [
+        Document.from_content(
+            name="Microsoft Expands Cloud Services with Azure Updates",
+            content="Microsoft has updated its Azure cloud services with enhanced AI and machine learning tools, along with new security features for data protection. These improvements aim to help businesses innovate and scale their operations more effectively.",  # noqa: E501
+        ),
+        Document.from_content(
+            name="Google Introduces New AI Tools for Workspace",
+            content="Google has launched new AI tools for Workspace, including smart compose in Docs and advanced data analysis in Sheets. These features are designed to streamline workflows and enhance productivity for users.",  # noqa: E501
+        ),
+    ]
+)
+print(f"DuckDB database path: {dvs.db_path.resolve()}")
+
+# Query the database
+results = asyncio.run(dvs.search("What are the new features of the iPhone?"))
+print(results)
+# [
+#     (
+#         Point(
+#             point_id="pt-8803e5df-c9df-4b01-9ce4-0b96217bf1f6",
+#             document_id="doc-b87f979a-b994-42c3-aa7f-70b76ff97da4",
+#             content_md5="14c88c0886f1ed68629303cf11270885",
+#             embedding=[],
+#             metadata={},
+#         ),
+#         Document(
+#             document_id="doc-b87f979a-b994-42c3-aa7f-70b76ff97da4",
+#             name="Apple has announced new feat",
+#             content="Apple has announced new features for its upcoming iPhone ...",
+#             content_md5="14c88c0886f1ed68629303cf11270885",
+#             metadata={"content_length": 239},
+#             created_at=1733470507,
+#             updated_at=1733470507,
+#         ),
+#         0.6913947463035583,
+#     ),
+#     (
+#         Point(
+#             point_id="pt-310b0550-b6c0-49fd-897f-fbc59f28e1f3",
+#             document_id="doc-958469dd-e1c9-4ead-8620-b730ce51220b",
+#             content_md5="79d8a6366ec174987672ec850af072d8",
+#             embedding=[],
+#             metadata={},
+#         ),
+#         Document(
+#             document_id="doc-958469dd-e1c9-4ead-8620-b730ce51220b",
+#             name="Microsoft Expands Cloud Services with Azure Updates",
+#             content="Microsoft has updated its Azure cloud services ...",
+#             content_md5="79d8a6366ec174987672ec850af072d8",
+#             metadata={},
+#             created_at=None,
+#             updated_at=None,
+#         ),
+#         0.27888885140419006,
+#     ),
+#     (
+#         Point(
+#             point_id="pt-b4f5f590-2040-44e1-b79f-26ee05f8a9cc",
+#             document_id="doc-2f43a241-e9e0-46b6-8df2-cc1898a13f14",
+#             content_md5="3a9a118392776e9dbcb4f6feb43dbaf0",
+#             embedding=[],
+#             metadata={},
+#         ),
+#         Document(
+#             document_id="doc-2f43a241-e9e0-46b6-8df2-cc1898a13f14",
+#             name="Google Introduces New AI Tools for Workspace",
+#             content="Google has launched new AI ...",
+#             content_md5="3a9a118392776e9dbcb4f6feb43dbaf0",
+#             metadata={},
+#             created_at=None,
+#             updated_at=None,
+#         ),
+#         0.22798193991184235,
+#     ),
+# ]
+```
+
 ### Usage in API Server
 
 1. Start the FastAPI server:
    ```shell
-   make run-server-dev
+   DB_PATH=<path/to/duckdb> && make run-server-dev DB_PATH=$DB_PATH
    ```
 
 2. Access the API documentation:

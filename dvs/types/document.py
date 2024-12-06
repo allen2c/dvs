@@ -80,6 +80,25 @@ class Document(BaseModel):
     def hash_content(cls, content: Text) -> Text:
         return dvs.utils.hash.hash_content(content)
 
+    @classmethod
+    def from_content(
+        cls,
+        content: Text,
+        name: Optional[Text] = None,
+        metadata: Optional[Dict[Text, Any]] = None,
+    ) -> "Document":
+        content = content.strip()
+        content_md5 = cls.hash_content(content)
+        metadata = metadata or {}
+        name = name or content.strip().split("\n\n")[0][:36]
+        doc = cls(
+            name=name,
+            content=content,
+            content_md5=content_md5,
+            metadata=metadata,
+        ).strip()
+        return doc
+
     def strip(self, *, copy: bool = False) -> "Document":
         _doc = self.model_copy(deep=True) if copy else self
         _doc.content = _doc.content.strip()
