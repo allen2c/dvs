@@ -7,11 +7,13 @@ from typing import Literal, Optional, Text
 import diskcache
 import duckdb
 import openai
+from faker import Faker
 from pydantic import Field, PrivateAttr, SecretStr
 from pydantic_settings import BaseSettings
 from rich.console import Console
 
 console = Console()
+fake = Faker()
 
 
 class Settings(BaseSettings):

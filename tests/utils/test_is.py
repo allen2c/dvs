@@ -10,6 +10,7 @@ from dvs.utils.to import vector_to_base64
     ("input", "expected"),
     [
         # Valid Base64 Strings
+        ("test", False),  # Plaintext
         ("Hello, World!", False),  # Plaintext
         ("SGVsbG8sIFdvcmxkIQ==", True),  # 'Hello, World!'
         ("SGVsbG8sIFdvcmxkIQ===", False),  # Invalid padding

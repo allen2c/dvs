@@ -172,10 +172,21 @@ class SearchRequest(BaseModel):
                     required_emb_items[idx] = search_request.query
                 # Query is provided as string, but no encoding hint
                 else:
-                    # Try to decode as base64.
+                    # Try to decode as base64 if string length is more than 12.
                     # If it can be decoded as base64, use it as a vector in high priority.  # noqa: E501
-                    if IS.is_base64(search_request.query):
-                        logger.debug(f"Probing queries[{idx}].query as base64 encoded.")
+                    if (
+                        IS.is_base64(search_request.query)
+                        and len(search_request.query) > 12
+                    ):
+                        peek_query = (
+                            f"{search_request.query[:12]}..."
+                            if len(search_request.query) > 12
+                            else search_request.query
+                        )  # noqa: E501
+                        logger.debug(
+                            f"Probed `queries[{idx}].query='{peek_query}'` "
+                            + "as base64 encoded."
+                        )
                         output_vectors[idx] = TO.base64_to_vector(search_request.query)
                     else:
                         required_emb_items[idx] = search_request.query
