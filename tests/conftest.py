@@ -12,6 +12,7 @@ if typing.TYPE_CHECKING:
 
 
 def pytest_configure(config):
+    os.environ["APP_ENV"] = "test"
     os.environ["DUCKDB_PATH"] = str(pathlib.Path(tempfile.mkdtemp()) / "test.duckdb")
 
 
