@@ -1,0 +1,4 @@
+site_name: DVS
+site_url: https://github.com/allen2c/dvs
+theme:
+  name: material
