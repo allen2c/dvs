@@ -1,6 +1,6 @@
 site_name: DVS
 
-repo_name: dvs
+repo_name: allen2c/dvs
 repo_url: https://github.com/allen2c/dvs
 site_author: allen2c
 site_description: A high-performance vector similarity search API powered by DuckDB and OpenAI embeddings.
@@ -8,6 +8,9 @@ site_url: https://allen2c.github.io/dvs/
 
 theme:
   name: material
+  palette:
+    primary: amber
+    accent: amber
 
 markdown_extensions:
   - pymdownx.superfences:
