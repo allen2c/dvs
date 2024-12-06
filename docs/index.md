@@ -4,9 +4,9 @@ A high-performance vector similarity search API powered by DuckDB and OpenAI emb
 
 ---
 
-**Documentation**: <a href="https://allen2c.github.io/dvs/" target="_blank">https://allen2c.github.io/dvs/</a>
+**Documentation**: [https://allen2c.github.io/dvs/](https://allen2c.github.io/dvs/)
 
-**Source Code**: <a href="https://github.com/allen2c/dvs" target="_blank">https://github.com/allen2c/dvs</a>
+**Source Code**: [https://github.com/allen2c/dvs](https://github.com/allen2c/dvs)
 
 ---
 
