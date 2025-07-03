@@ -1,5 +1,5 @@
 from ._dvs import DVS
-from .config import Settings, settings
+from .config import Settings
 from .types.document import Document
 from .types.point import Point
 from .version import VERSION
@@ -11,5 +11,4 @@ __all__ = [
     "Document",
     "Point",
     "Settings",
-    "settings",
 ]

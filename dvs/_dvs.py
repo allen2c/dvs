@@ -1,13 +1,12 @@
+import pathlib
 import time
-from pathlib import Path
-from typing import Iterable, List, Optional, Text, Tuple, Union
+import typing
 
-import diskcache
 import duckdb
-from openai import OpenAI
+import openai
 
 import dvs.utils.vss as VSS
-from dvs.config import settings
+from dvs.config import Settings
 from dvs.types.document import Document
 from dvs.types.point import Point
 from dvs.types.search_request import SearchRequest
@@ -16,31 +15,38 @@ from dvs.types.search_request import SearchRequest
 class DVS:
     def __init__(
         self,
-        duckdb_path: Optional[Union[Path, Text]] = None,
+        settings: typing.Union[pathlib.Path, str] | Settings,
         *,
-        touch: bool = True,
-        raise_if_exists: bool = False,
         debug: bool = False,
-        openai_client: Optional["OpenAI"] = None,
-        cache: Optional["diskcache.Cache"] = None,
+        openai_client: openai.OpenAI | openai.AzureOpenAI | None = None,
+        raise_if_exists: bool = False,
+        touch: bool = True,
     ):
-        self._db_path = Path(duckdb_path or settings.DUCKDB_PATH)
+        if isinstance(settings, Settings):
+            self.settings = settings
+        else:
+            self.settings = Settings(DUCKDB_PATH=str(settings))
+
+        if self.settings.DUCKDB_PATH is None:
+            raise ValueError("DUCKDB_PATH is not set")
+
+        self._db_path = self.settings.DUCKDB_PATH
         self.debug = debug
-        self.openai_client = openai_client or settings.openai_client
-        self.cache = cache or settings.cache
+        self.openai_client = openai_client or openai.OpenAI()
+        self.cache = self.settings.cache
 
         if touch:
             self.touch(raise_if_exists=raise_if_exists, debug=debug)
 
     @property
-    def db_path(self) -> Path:
-        return self._db_path
+    def db_path(self) -> pathlib.Path:
+        return pathlib.Path(self._db_path)
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
         return duckdb.connect(self._db_path)  # Always open a new duckdb connection
 
-    def touch(self, *, raise_if_exists: bool = False, debug: Optional[bool] = None):
+    def touch(self, *, raise_if_exists: bool = False, debug: bool | None = None):
         """
         Initialize the DuckDB database tables required for vector similarity search.
 
@@ -77,16 +83,16 @@ class DVS:
 
     def add(
         self,
-        documents: Union[
+        documents: typing.Union[
             Document,
-            Iterable[Document],
-            Text,
-            Iterable[Text],
-            Iterable[Union[Document, Text]],
+            typing.Iterable[Document],
+            str,
+            typing.Iterable[str],
+            typing.Iterable[typing.Union[Document, str]],
         ],
         *,
-        debug: Optional[bool] = None,
-    ) -> List[Tuple[Document, List[Point]]]:
+        debug: bool | None = None,
+    ) -> list[tuple[Document, list[Point]]]:
         """
         Add one or more documents to the vector similarity search database.
 
@@ -121,14 +127,14 @@ class DVS:
         """  # noqa: E501
 
         debug = self.debug if debug is None else debug
-        output: List[Tuple[Document, List[Point]]] = []
+        output: list[tuple[Document, list[Point]]] = []
 
         # Validate documents
-        if isinstance(documents, Text) or isinstance(documents, Document):
+        if isinstance(documents, str) or isinstance(documents, Document):
             documents = [documents]
-        docs: List["Document"] = []
+        docs: list["Document"] = []
         for idx, doc in enumerate(documents):
-            if isinstance(doc, Text):
+            if isinstance(doc, str):
                 doc = doc.strip()
                 if not doc:
                     raise ValueError(f"Document [{idx}] content cannot be empty: {doc}")
@@ -156,7 +162,7 @@ class DVS:
 
         # Collect documents and points
         for doc in docs:
-            points: List[Point] = doc.to_points()
+            points: list[Point] = doc.to_points()
             output.append((doc, points))
 
         # Create embeddings
@@ -177,9 +183,9 @@ class DVS:
 
     def remove(
         self,
-        doc_ids: Union[Text, Iterable[Text]],
+        doc_ids: typing.Union[str, typing.Iterable[str]],
         *,
-        debug: Optional[bool] = None,
+        debug: bool | None = None,
     ) -> None:
         """
         Remove one or more documents and their associated vector points from the database.
@@ -209,7 +215,7 @@ class DVS:
         """  # noqa: E501
 
         debug = self.debug if debug is None else debug
-        doc_ids = [doc_ids] if isinstance(doc_ids, Text) else list(doc_ids)
+        doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
 
         for doc_id in doc_ids:
             Document.objects.remove(doc_id, conn=self.conn, debug=debug)
@@ -221,12 +227,12 @@ class DVS:
 
     async def search(
         self,
-        query: Text,
+        query: str,
         top_k: int = 3,
         *,
         with_embedding: bool = False,
-        debug: Optional[bool] = None,
-    ) -> List[Tuple["Point", Optional["Document"], float]]:
+        debug: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
         """
         Perform an asynchronous vector similarity search using text query.
 
@@ -278,8 +284,12 @@ class DVS:
         results = await VSS.vector_search(
             vector=vector,
             top_k=search_req.top_k,
+            embedding_dimensions=self.settings.EMBEDDING_DIMENSIONS,
+            documents_table_name=self.settings.DOCUMENTS_TABLE_NAME,
+            points_table_name=self.settings.POINTS_TABLE_NAME,
             conn=self.conn,
             with_embedding=search_req.with_embedding,
+            console=self.settings.console,
         )
 
         return results

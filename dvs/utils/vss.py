@@ -1,12 +1,12 @@
 import asyncio
 import copy
 import json
-from typing import List, Optional, Text, Tuple
+from typing import List, Text, Tuple
 
 import duckdb
+import rich.console
 
 import dvs.utils.sql_stmts as SQL_STMTS
-from dvs.config import console, settings
 from dvs.types.columns import (
     COLUMN_NAMES_WITH_EMBEDDING,
     COLUMN_NAMES_WITHOUT_EMBEDDING,
@@ -20,44 +20,20 @@ async def vector_search(
     vector: List[float],
     *,
     top_k: int,
-    embedding_dimensions: int = settings.EMBEDDING_DIMENSIONS,
-    documents_table_name: Text = settings.DOCUMENTS_TABLE_NAME,
-    points_table_name: Text = settings.POINTS_TABLE_NAME,
+    embedding_dimensions: int,
+    documents_table_name: Text,
+    points_table_name: Text,
     conn: "duckdb.DuckDBPyConnection",
     with_embedding: bool = True,
     debug: bool = False,
-) -> List[Tuple["Point", Optional["Document"], float]]:
+    console: rich.console.Console | None = None,
+) -> list[tuple["Point", "Document", float]]:
     """
     Perform a vector similarity search in a DuckDB database.
 
     This function executes a vector similarity search using the provided embedding vector
     against the points stored in the specified DuckDB table. It returns the top-k most
     similar points along with their associated documents and relevance scores.
-
-    Parameters
-    ----------
-    vector : List[float]
-        The query vector to search for similar points.
-    top_k : int
-        The number of most similar points to return.
-    embedding_dimensions : int
-        The dimensionality of the embedding vectors.
-    documents_table_name : Text
-        The name of the table containing document information.
-    points_table_name : Text
-        The name of the table containing point information and embeddings.
-    conn : duckdb.DuckDBPyConnection
-        An active connection to the DuckDB database.
-    with_embedding : bool, optional
-        Whether to include the embedding vector in the results (default is True).
-
-    Returns
-    -------
-    List[Tuple["Point", Optional["Document"], float]]
-        A list of tuples, each containing:
-        - Point: The matched point information.
-        - Document: The associated document information (if available).
-        - float: The relevance score (cosine similarity) between the query vector and the point.
 
     Notes
     -----
@@ -86,7 +62,7 @@ async def vector_search(
     api_search : API endpoint that utilizes this vector search function.
     """  # noqa: E501
 
-    output: List[Tuple["Point", Optional["Document"], float]] = []
+    output: List[Tuple["Point", "Document", float]] = []
 
     column_names_expr = ", ".join(
         list(
@@ -103,7 +79,7 @@ async def vector_search(
         points_table_name=points_table_name,
     )
     params = [vector]
-    if debug:
+    if debug and console:
         console.print(
             "\nPerforming vector similarity search with SQL:\n"
             + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"

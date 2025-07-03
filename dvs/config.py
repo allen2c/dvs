@@ -62,11 +62,7 @@ class Settings(pydantic_settings.BaseSettings):
 
     @functools.cached_property
     def cache(self) -> diskcache.Cache:
-        if self._cache is None:
-            self._cache = diskcache.Cache(
-                self.CACHE_PATH, size_limit=self.CACHE_SIZE_LIMIT
-            )
-        return self._cache
+        return diskcache.Cache(self.CACHE_PATH, size_limit=self.CACHE_SIZE_LIMIT)
 
     @functools.cached_property
     def temp_dir(self) -> pathlib.Path:
@@ -74,15 +70,8 @@ class Settings(pydantic_settings.BaseSettings):
         _dir.mkdir(parents=True, exist_ok=True)
         return _dir
 
-    @functools.cached_property
-    def duckdb_path(self) -> pathlib.Path:
-        if self.DUCKDB_PATH is None:
-            raise ValueError("DUCKDB_PATH is not set")
-        _path = pathlib.Path(self.DUCKDB_PATH)
-        if not _path.is_file():
-            raise FileNotFoundError(f"DuckDB database file not found: {_path}")
-        return _path
-
     @property
     def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
-        return duckdb.connect(self.duckdb_path)
+        if self.DUCKDB_PATH is None:
+            raise ValueError("DUCKDB_PATH is not set")
+        return duckdb.connect(self.DUCKDB_PATH)

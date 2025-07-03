@@ -76,7 +76,7 @@ class SearchRequest(BaseModel):
         search_requests: "SearchRequest" | List["SearchRequest"],
         *,
         cache: Cache,
-        openai_client: "openai.OpenAI",
+        openai_client: openai.OpenAI | openai.AzureOpenAI,
     ) -> List[List[float]]:
         """
         Convert search requests to vector embeddings, handling various input types and encodings.
