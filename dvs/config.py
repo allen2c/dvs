@@ -74,8 +74,15 @@ class Settings(pydantic_settings.BaseSettings):
         _dir.mkdir(parents=True, exist_ok=True)
         return _dir
 
-    @property
-    def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
+    @functools.cached_property
+    def duckdb_path(self) -> pathlib.Path:
         if self.DUCKDB_PATH is None:
             raise ValueError("DUCKDB_PATH is not set")
-        return duckdb.connect(self.DUCKDB_PATH)
+        _path = pathlib.Path(self.DUCKDB_PATH)
+        if not _path.is_file():
+            raise FileNotFoundError(f"DuckDB database file not found: {_path}")
+        return _path
+
+    @property
+    def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
+        return duckdb.connect(self.duckdb_path)

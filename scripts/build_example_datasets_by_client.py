@@ -2,30 +2,31 @@
 # http://mlg.ucd.ie/datasets/bbc.html
 
 import asyncio
-from pathlib import Path
 
 from rich.prompt import Confirm
 
 from dvs import DVS
-from dvs.config import console, settings
+from dvs.config import Settings
 from dvs.utils.datasets import download_documents
-
-if Path(settings.DUCKDB_PATH).exists():
-    is_rebuild = Confirm.ask(
-        f"DuckDB database already exists: {settings.DUCKDB_PATH}. Rebuild?"
-    )
-    if is_rebuild:
-        Path(settings.DUCKDB_PATH).unlink()
-        console.print(f"Deleted DuckDB database: {settings.DUCKDB_PATH}")
-    else:
-        console.print("Aborted")
-        raise SystemExit()
-
-
-client = DVS(debug=True)
 
 
 async def main():
+    settings = Settings()
+    console = settings.console
+
+    if settings.duckdb_path.exists():
+        is_rebuild = Confirm.ask(
+            f"DuckDB database already exists: {settings.duckdb_path}. Rebuild?"
+        )
+        if is_rebuild:
+            settings.duckdb_path.unlink()
+            console.print(f"Deleted DuckDB database: {settings.duckdb_path}")
+        else:
+            console.print("Aborted")
+            raise SystemExit()
+
+    client = DVS(debug=True)
+
     docs = download_documents(name="bbc", overwrite=False)
     console.print(docs[0])
 
