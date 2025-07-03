@@ -25,7 +25,7 @@ install-all:
 update-all:
 	poetry update
 	poetry export --without-hashes -f requirements.txt --output requirements.txt
-	poetry export --without-hashes --all-extras --all-groups requirements.txt --output requirements-all.txt
+	poetry export --without-hashes --all-extras --all-groups -f requirements.txt --output requirements-all.txt
 
 mkdocs:
 	mkdocs serve
