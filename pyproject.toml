@@ -18,6 +18,7 @@ openai-embeddings-model = "*"
 pydantic = "^2"
 pydantic-settings = "*"
 python = ">=3.11,<4"
+str-or-none = "*"
 uuid-utils = "*"
 
 [tool.poetry.extras]
