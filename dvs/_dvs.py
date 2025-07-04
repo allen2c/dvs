@@ -1,15 +1,21 @@
+import functools
 import pathlib
 import time
 import typing
 
 import duckdb
 import openai
+import openai_embeddings_model as oai_emb_model
 
 import dvs.utils.vss as VSS
 from dvs.config import Settings
 from dvs.types.document import Document
 from dvs.types.point import Point
 from dvs.types.search_request import SearchRequest
+
+if typing.TYPE_CHECKING:
+    from dvs.resources.manifest.api import Manifest
+    from dvs.types.manifest import Manifest as ManifestType
 
 
 class DVS:
@@ -18,33 +24,28 @@ class DVS:
         settings: typing.Union[pathlib.Path, str] | Settings,
         *,
         debug: bool = False,
-        openai_client: openai.OpenAI | openai.AzureOpenAI | None = None,
+        model_settings: oai_emb_model.ModelSettings | None = None,
+        model: oai_emb_model.OpenAIEmbeddingsModel | str,
         raise_if_exists: bool = False,
         touch: bool = True,
+        verbose: bool = False,
     ):
-        if isinstance(settings, Settings):
-            self.settings = settings
-        else:
-            self.settings = Settings(DUCKDB_PATH=str(settings))
-
-        if self.settings.DUCKDB_PATH is None:
-            raise ValueError("DUCKDB_PATH is not set")
-
-        self._db_path = self.settings.DUCKDB_PATH
-        self.debug = debug
-        self.openai_client = openai_client or openai.OpenAI()
-        self.cache = self.settings.cache
+        self.settings = self._ensure_dvs_settings(settings)
+        self.verbose = verbose or debug
+        self.model = self._ensure_model(model)
+        self.model_settings = model_settings or oai_emb_model.ModelSettings()
+        self.db_manifest = self._ensure_manifest(self.model, self.model_settings)
 
         if touch:
             self.touch(raise_if_exists=raise_if_exists, debug=debug)
 
     @property
     def db_path(self) -> pathlib.Path:
-        return pathlib.Path(self._db_path)
+        return pathlib.Path(self.settings.DUCKDB_PATH)
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
-        return duckdb.connect(self._db_path)  # Always open a new duckdb connection
+        return duckdb.connect(self.db_path)  # Always open a new duckdb connection
 
     def touch(self, *, raise_if_exists: bool = False, debug: bool | None = None):
         """
@@ -293,3 +294,76 @@ class DVS:
         )
 
         return results
+
+    @functools.cached_property
+    def manifest(self) -> "Manifest":
+        from dvs.resources.manifest.api import Manifest
+
+        return Manifest(self)
+
+    def _ensure_dvs_settings(
+        self, settings: typing.Union[pathlib.Path, str] | Settings
+    ) -> Settings:
+        if isinstance(settings, Settings):
+            pass
+        else:
+            settings = Settings(DUCKDB_PATH=str(settings))
+
+        if settings.DUCKDB_PATH is None:
+            raise ValueError("DUCKDB_PATH is not set")
+
+        return settings
+
+    def _ensure_model(
+        self, model: oai_emb_model.OpenAIEmbeddingsModel | str
+    ) -> oai_emb_model.OpenAIEmbeddingsModel:
+        if isinstance(model, oai_emb_model.OpenAIEmbeddingsModel):
+            return model
+        else:
+            return oai_emb_model.OpenAIEmbeddingsModel(
+                model, openai.OpenAI(), oai_emb_model.get_default_cache()
+            )
+
+    def _ensure_manifest(
+        self,
+        model: oai_emb_model.OpenAIEmbeddingsModel,
+        model_settings: oai_emb_model.ModelSettings,
+    ) -> "ManifestType":
+        """
+        Ensure the manifest of the database is consistent with the model and model settings.
+
+        Set dimensions to model settings if None in place.
+        """  # noqa: E501
+
+        manifest: "ManifestType"
+        might_manifest = self.manifest.receive()
+        if might_manifest is None:
+            if model_settings.dimensions is None:
+                raise ValueError(
+                    "Could not infer the embedding dimensions, "
+                    + "please provide the model settings."
+                )
+            else:
+                manifest = self.manifest.create(
+                    ManifestType(
+                        embedding_model=self.model.model,
+                        embedding_dimensions=model_settings.dimensions,
+                    )
+                )
+        else:
+            manifest = might_manifest
+            if manifest.embedding_model != model.model:
+                raise ValueError(
+                    "The indicated embedding model is not the same as "
+                    + "the one in the manifest of the database"
+                )
+            if model_settings.dimensions is not None:
+                if manifest.embedding_dimensions != model_settings.dimensions:
+                    raise ValueError(
+                        "The indicated embedding dimensions are not the same as "
+                        + "the one in the manifest of the database"
+                    )
+            else:
+                model_settings.dimensions = manifest.embedding_dimensions
+
+        return manifest

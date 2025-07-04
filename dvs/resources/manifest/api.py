@@ -37,7 +37,7 @@ class Manifest:
 
         return manifest
 
-    def create(self, manifest: ManifestType) -> ManifestType | None:
+    def create(self, manifest: ManifestType) -> ManifestType:
         columns = list(manifest.model_json_schema()["properties"].keys())
         columns_expr = ", ".join(columns)
         placeholders = ", ".join(["?" for _ in columns])
