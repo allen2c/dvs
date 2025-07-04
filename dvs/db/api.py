@@ -3,9 +3,7 @@ import typing
 
 import dvs
 from dvs.utils.display import DISPLAY_SQL_QUERY
-from dvs.utils.sql_stmts import (
-    SQL_STMT_INSTALL_EXTENSIONS,
-)
+from dvs.utils.sql_stmts import SQL_STMT_INSTALL_EXTENSIONS, SQL_STMT_SHOW_TABLES
 
 if typing.TYPE_CHECKING:
     from dvs.db.documents.api import Documents
@@ -64,6 +62,12 @@ class DB:
         self.dvs.conn.sql(SQL_STMT_INSTALL_EXTENSIONS)
 
         return True
+
+    def show_tables(self) -> typing.Tuple[typing.Text, ...]:
+        res: typing.List[typing.Tuple[typing.Text]] = self.dvs.conn.sql(
+            SQL_STMT_SHOW_TABLES
+        ).fetchall()
+        return tuple(r[0] for r in res)
 
     @functools.cached_property
     def manifest(self) -> "Manifest":
