@@ -5,7 +5,9 @@ import typing
 import duckdb
 import openai
 import openai_embeddings_model as oai_emb_model
+from str_or_none import str_or_none
 
+import dvs
 import dvs.utils.vss as VSS
 from dvs.config import Settings
 from dvs.types.document import Document
@@ -59,6 +61,7 @@ class DVS:
         ],
         *,
         embeddings_batch_size: int = 500,
+        create_embeddings_batch_size: int = 100,
         verbose: bool | None = None,
     ) -> typing.Dict:
         """
@@ -126,6 +129,7 @@ class DVS:
             )
             self.db.points.bulk_create(
                 [pt for pt, _ in batch_points_with_contents],
+                batch_size=create_embeddings_batch_size,
                 verbose=verbose,
             )
 
@@ -140,7 +144,7 @@ class DVS:
         self,
         doc_ids: typing.Union[str, typing.Iterable[str]],
         *,
-        debug: bool | None = None,
+        verbose: bool | None = None,
     ) -> None:
         """
         Remove one or more documents and their associated vector points from the database.
@@ -168,16 +172,12 @@ class DVS:
         - This operation is irreversible and will permanently delete the documents
         - If a document ID doesn't exist, a NotFoundError will be raised
         """  # noqa: E501
-        raise NotImplementedError  # TODO: implement
-
-        debug = self.debug if debug is None else debug
+        verbose = self.verbose if verbose is None else verbose
         doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
 
+        self.db.points.remove_many(document_ids=doc_ids, verbose=verbose)
         for doc_id in doc_ids:
-            Document.objects.remove(doc_id, conn=self.conn, debug=debug)
-            Point.objects.remove_many(
-                document_ids=[doc_id], conn=self.conn, debug=debug
-            )
+            self.db.documents.remove(doc_id, verbose=verbose)
 
         return None
 
@@ -187,7 +187,7 @@ class DVS:
         top_k: int = 3,
         *,
         with_embedding: bool = False,
-        debug: bool | None = None,
+        verbose: bool | None = None,
     ) -> list[tuple["Point", "Document", float]]:
         """
         Perform an asynchronous vector similarity search using text query.
@@ -220,10 +220,11 @@ class DVS:
         - OpenAI API costs apply for generating query embeddings
         - Large top_k values may impact performance
         """  # noqa: E501
-        raise NotImplementedError  # TODO: implement
 
-        query = query.strip()
-        if not query:
+        verbose = self.verbose if verbose is None else verbose
+
+        sanitized_query = str_or_none(query)
+        if sanitized_query is None:
             raise ValueError("Query cannot be empty")
 
         # Validate search request
@@ -232,8 +233,8 @@ class DVS:
         )
         vectors = await SearchRequest.to_vectors(
             [search_req],
-            cache=self.cache,
-            openai_client=self.openai_client,
+            model=self.model,
+            model_settings=self.model_settings,
         )
         vector = vectors[0]
 
@@ -241,9 +242,9 @@ class DVS:
         results = await VSS.vector_search(
             vector=vector,
             top_k=search_req.top_k,
-            embedding_dimensions=self.settings.EMBEDDING_DIMENSIONS,
-            documents_table_name=self.settings.DOCUMENTS_TABLE_NAME,
-            points_table_name=self.settings.POINTS_TABLE_NAME,
+            embedding_dimensions=self.db_manifest.embedding_dimensions,
+            documents_table_name=dvs.DOCUMENTS_TABLE_NAME,
+            points_table_name=dvs.POINTS_TABLE_NAME,
             conn=self.conn,
             with_embedding=search_req.with_embedding,
             console=self.settings.console,
