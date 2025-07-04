@@ -175,8 +175,8 @@ class Points:
             typing.Sequence[typing.Union["PointType", typing.Dict]],
         ],
         *,
+        batch_size: int = 100,
         verbose: bool | None = None,
-        batch_size: int = 20,
     ) -> typing.List["PointType"]:
         """
         Create multiple points in the DuckDB database in batches.
@@ -689,7 +689,14 @@ class Points:
         for _batch_pts in _iter_batch_pts:
             parameters: typing.List[typing.Tuple[typing.Any, ...]] = []
             for pt in _batch_pts:
-                parameters.append(tuple([getattr(pt, c) for c in columns]))
+                parameters.append(
+                    tuple(
+                        [
+                            getattr(pt, c) if c != "embedding" else pt.to_python()
+                            for c in columns
+                        ]
+                    )
+                )
 
             query = (
                 f"INSERT INTO {dvs.POINTS_TABLE_NAME} ({columns_expr}) "

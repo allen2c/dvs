@@ -176,7 +176,7 @@ class Document(pydantic.BaseModel):
             emb_resp = model.get_embeddings(
                 input=_content, model_settings=model_settings
             )
-            _pt.embedding = emb_resp.to_python()[0]
+            _pt.embedding = emb_resp.output[0]
 
         _pts_with_contents = ([_pt], [_content])
 

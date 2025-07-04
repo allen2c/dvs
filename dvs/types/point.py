@@ -48,8 +48,8 @@ class Point(pydantic.BaseModel):
         ...,
         description="MD5 hash of the content for quick comparison and integrity checks.",  # noqa: E501
     )
-    embedding: typing.List[float] | typing.Sequence[typing.Text] = pydantic.Field(
-        default_factory=list,
+    embedding: typing.Text | None = pydantic.Field(
+        default=None,
         description=(
             "Vector embedding representation of the point. "
             + "Python list of floats (float64) or "
@@ -85,7 +85,7 @@ class Point(pydantic.BaseModel):
         _embeddings_resp = model.get_embeddings(
             input=_contents, model_settings=model_settings
         )
-        for point, embedding in zip(points, _embeddings_resp.to_python()):
+        for point, embedding in zip(points, _embeddings_resp.output):
             point.embedding = embedding
             output.append(point)
 
@@ -94,4 +94,16 @@ class Point(pydantic.BaseModel):
 
     @property
     def is_embedded(self) -> bool:
-        return len(self.embedding) > 0
+        return self.embedding is not None
+
+    def to_python(self) -> typing.List[float]:
+        import base64
+
+        import numpy as np
+
+        if self.embedding is None:
+            raise ValueError("Embedding is not set")
+
+        return np.frombuffer(
+            base64.b64decode(self.embedding), dtype=np.float32
+        ).tolist()
