@@ -1,46 +1,20 @@
 import json
-import time
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Generator,
-    List,
-    Literal,
-    Optional,
-    Sequence,
-    Text,
-    Tuple,
-    Type,
-    Union,
-)
+import typing
 
-import duckdb
 import jinja2
-from openai import APIStatusError, ConflictError, NotFoundError
-from tqdm import tqdm
+from openai import NotFoundError
 
 import dvs
 import dvs.utils.openapi as openapi_utils
 from dvs.types.document import Document as DocumentType
 from dvs.types.paginations import Pagination
-from dvs.utils.chunk import chunks
 from dvs.utils.display import (
     DISPLAY_SQL_PARAMS,
     DISPLAY_SQL_QUERY,
     display_sql_parameters,
 )
 from dvs.utils.dummies import dummy_httpx_response
-from dvs.utils.ensure import ensure_dict
-from dvs.utils.openapi import openapi_to_create_table_sql
-from dvs.utils.sql_stmts import (
-    SQL_STMT_CREATE_EMBEDDING_INDEX,
-    SQL_STMT_DROP_TABLE,
-    SQL_STMT_INSTALL_EXTENSIONS,
-    SQL_STMT_REMOVE_OUTDATED_POINTS,
-    SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE,
-    SQL_STMT_SHOW_TABLES,
-)
+from dvs.utils.sql_stmts import SQL_STMT_DROP_TABLE
 from dvs.utils.timer import Timer
 
 
@@ -72,15 +46,15 @@ class Documents:
             self._touch(verbose=verbose)
 
         if verbose:
+            dur = timer.duration * 1000
             self.dvs.settings.console.print(
-                f"Created table: '{dvs.DOCUMENTS_TABLE_NAME}' in "
-                + f"{timer.duration:.3f} ms"
+                f"Created table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
             )
 
         return True
 
     def retrieve(
-        self, document_id: Text, *, verbose: bool | None = None
+        self, document_id: typing.Text, *, verbose: bool | None = None
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
@@ -107,13 +81,17 @@ class Documents:
         with Timer() as timer:
             out = self._retrieve(document_id, verbose=verbose)
         if verbose:
+            dur = timer.duration * 1000
             self.dvs.settings.console.print(
-                f"Retrieved document: '{document_id}' in " + f"{timer.duration:.3f} ms"
+                f"Retrieved document: '{document_id}' in {dur:.3f} ms"
             )
         return out
 
     def create(
-        self, document: Union[DocumentType, Dict], *, verbose: bool | None = None
+        self,
+        document: typing.Union[DocumentType, typing.Dict],
+        *,
+        verbose: bool | None = None,
     ) -> DocumentType:
         """
         Create a single document in the DuckDB database.
@@ -136,20 +114,22 @@ class Documents:
             docs = self._bulk_create([document], verbose=verbose)  # type: ignore
         doc = docs[0]
         if verbose:
+            dur = timer.duration * 1000
             self.dvs.settings.console.print(
-                f"Created document: '{doc.document_id}' in "
-                + f"{timer.duration:.3f} ms"
+                f"Created document: '{doc.document_id}' in {dur:.3f} ms"
             )
         return doc
 
     def bulk_create(
         self,
-        documents: Union[
-            Sequence[DocumentType], Sequence[Dict], Sequence[Union[DocumentType, Dict]]
+        documents: typing.Union[
+            typing.Sequence[DocumentType],
+            typing.Sequence[typing.Dict],
+            typing.Sequence[typing.Union[DocumentType, typing.Dict]],
         ],
         *,
         verbose: bool | None = None,
-    ) -> List[DocumentType]:
+    ) -> typing.List[DocumentType]:
         """
         Insert multiple documents into the DuckDB database.
 
@@ -171,7 +151,7 @@ class Documents:
             documents = [
                 (
                     DocumentType.model_validate(doc).strip()
-                    if isinstance(doc, Dict)
+                    if isinstance(doc, typing.Dict)
                     else doc.strip()
                 )
                 for doc in documents
@@ -189,6 +169,215 @@ class Documents:
             )
 
         return documents
+
+    def remove(self, document_id: typing.Text, *, verbose: bool | None = None) -> None:
+        """
+        Remove a document from the DuckDB database by its ID.
+
+        This function executes a DELETE SQL statement to remove a document
+        identified by the given `document_id` from the specified DuckDB table.
+        It provides an option to output debug information, including the SQL
+        query and execution time.
+
+        Notes
+        -----
+        - The function uses parameterized queries to prevent SQL injection.
+        - Debug mode provides SQL query details and timing information.
+        """
+        verbose = self.dvs.verbose if verbose is None else verbose
+        with Timer() as timer:
+            self._remove(document_id, verbose=verbose)
+
+        if verbose:
+            dur = timer.duration * 1000
+            self.dvs.settings.console.print(
+                f"Deleted document: '{document_id}' in {dur:.3f} ms"
+            )
+        return None
+
+    def list(
+        self,
+        *,
+        after: typing.Optional[typing.Text] = None,
+        before: typing.Optional[typing.Text] = None,
+        limit: int = 20,
+        order: typing.Literal["asc", "desc"] = "asc",
+        verbose: bool | None = None,
+    ) -> Pagination[DocumentType]:
+        """
+        Retrieve a paginated list of documents from the DuckDB database.
+
+        This function constructs and executes a SQL query to fetch documents from the
+        database, with optional filtering based on document ID. It supports pagination
+        by allowing the caller to specify a limit on the number of documents returned
+        and whether to order the results in ascending or descending order.
+
+        The function also provides an option to output debug information, including
+        the SQL query and execution time.
+
+        Notes
+        -----
+        - The function uses parameterized queries to prevent SQL injection.
+        - The `after` and `before` parameters are mutually exclusive and determine
+        the starting point for the pagination.
+        - The function fetches one more document than the specified limit to check
+        if there are more results available.
+
+        Examples
+        --------
+        >>> conn = duckdb.connect('database.duckdb')
+        >>> pagination = Document.objects.list(
+        ...     after='doc_123',
+        ...     limit=10,
+        ...     order='asc',
+        ...     conn=conn,
+        ...     debug=True
+        ... )
+        """
+        with Timer() as timer:
+            out = self._list(
+                after=after,
+                before=before,
+                limit=limit,
+                order=order,
+                verbose=verbose,
+            )
+
+        if verbose:
+            dur = timer.duration * 1000
+            self.dvs.settings.console.print(f"Listed documents in {dur:.3f} ms")
+        return out
+
+    def gen(
+        self,
+        *,
+        after: typing.Optional[typing.Text] = None,
+        before: typing.Optional[typing.Text] = None,
+        limit: int = 20,
+        order: typing.Literal["asc", "desc"] = "asc",
+        verbose: bool | None = None,
+    ) -> typing.Generator[DocumentType, None, None]:
+        """
+        Generate and yield documents from the DuckDB database with pagination support.
+
+        A generator wrapper around the list() method that handles pagination automatically,
+        yielding individual documents until all matching records have been retrieved. This is
+        useful for processing large result sets without loading all documents into memory at once.
+
+        Notes
+        -----
+        - Automatically handles pagination using cursor-based pagination with document_id
+        - Memory efficient as it yields documents one at a time
+        - Maintains the same filtering and ordering capabilities as the list() method
+
+        Examples
+        --------
+        >>> conn = duckdb.connect('database.duckdb')
+        >>> for document in Document.objects.gen(
+        ...     limit=100,
+        ...     conn=conn,
+        ...     debug=True
+        ... ):
+        ...     process_document(document)
+        """  # noqa: E501
+
+        has_more = True
+        current_after = after
+        while has_more:
+            documents = self.list(
+                after=current_after,
+                before=before,
+                limit=limit,
+                order=order,
+                verbose=verbose,
+            )
+            has_more = documents.has_more
+            current_after = documents.last_id
+            for doc in documents.data:
+                yield doc
+
+    def count(
+        self,
+        *,
+        document_id: typing.Optional[typing.Text] = None,
+        content_md5: typing.Optional[typing.Text] = None,
+        verbose: bool | None = None,
+    ) -> int:
+        """
+        Count the number of documents in the DuckDB database with optional filters.
+
+        This function executes a SQL COUNT query on the documents table, allowing
+        optional filtering by `document_id` and `content_md5`. It provides an option
+        to output debug information, including the SQL query and execution time.
+
+        Notes
+        -----
+        - The function uses parameterized queries to prevent SQL injection.
+        - Debug mode provides SQL query details and timing information.
+        """
+        verbose = self.dvs.verbose if verbose is None else verbose
+        with Timer() as timer:
+            out = self._count(
+                document_id=document_id,
+                content_md5=content_md5,
+                verbose=verbose,
+            )
+        if verbose:
+            dur = timer.duration * 1000
+            self.dvs.settings.console.print(f"Counted documents in {dur:.3f} ms")
+        return out
+
+    def drop(
+        self,
+        *,
+        force: bool = False,
+        verbose: bool | None = None,
+        touch_after_drop: bool = True,
+    ) -> None:
+        """
+        Drop the documents table from the DuckDB database.
+
+        This method deletes the entire documents table, including all its data and associated
+        indexes or constraints. It requires explicit confirmation through the `force` parameter
+        to prevent accidental data loss.
+
+        Notes
+        -----
+        - The operation is irreversible and will permanently delete all data in the table.
+        - Debug mode provides SQL query details and timing information.
+
+        Warnings
+        --------
+        This operation is irreversible and will permanently delete all documents data.
+        Use with caution.
+
+        Examples
+        --------
+        >>> conn = duckdb.connect('database.duckdb')
+        >>> Document.objects.drop(conn=conn, force=True, debug=True)
+        Dropping table: 'documents' with SQL:
+        ...
+        Dropped table: 'documents' in 1.234 ms
+        """  # noqa: E501
+
+        if not force:
+            raise ValueError("Use force=True to drop table.")
+
+        verbose = self.dvs.verbose if verbose is None else verbose
+
+        with Timer() as timer:
+            self._drop(verbose=verbose)
+
+        if touch_after_drop:
+            self._touch(verbose=verbose)
+
+        if verbose:
+            dur = timer.duration * 1000
+            self.dvs.settings.console.print(
+                f"Dropped table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
+            )
+
+        return None
 
     def _touch(self, *, verbose: bool | None = None) -> bool:
         """
@@ -217,7 +406,7 @@ class Documents:
         return True
 
     def _retrieve(
-        self, document_id: Text, *, verbose: bool | None = None
+        self, document_id: typing.Text, *, verbose: bool | None = None
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
@@ -256,8 +445,11 @@ class Documents:
         return out
 
     def _bulk_create(
-        self, documents: Sequence["DocumentType"], *, verbose: bool | None = None
-    ) -> List[DocumentType]:
+        self,
+        documents: typing.Sequence[DocumentType],
+        *,
+        verbose: bool | None = None,
+    ) -> typing.List[DocumentType]:
         """
         Insert multiple documents into the DuckDB database.
         """  # noqa: E501
@@ -268,7 +460,7 @@ class Documents:
         columns = list(documents[0].model_json_schema()["properties"].keys())
         columns_expr = ", ".join(columns)
         placeholders = ", ".join(["?" for _ in columns])
-        parameters: List[Tuple[Any, ...]] = [
+        parameters: typing.List[typing.Tuple[typing.Any, ...]] = [
             tuple(getattr(doc, c) for c in columns) for doc in documents
         ]
 
@@ -288,3 +480,141 @@ class Documents:
         self.dvs.conn.executemany(query, parameters)
 
         return list(documents)
+
+    def _remove(self, document_id: typing.Text, *, verbose: bool | None) -> None:
+        """
+        Remove a document from the DuckDB database by its ID.
+        """
+        # Prepare delete query
+        query = f"DELETE FROM {dvs.DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
+        parameters = [document_id]
+        if verbose:
+            self.dvs.settings.console.print(
+                f"\nDeleting document: '{document_id}' with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
+            )
+
+        # Delete document
+        self.dvs.conn.execute(query, parameters)
+
+        return None
+
+    def _list(
+        self,
+        *,
+        after: typing.Optional[typing.Text],
+        before: typing.Optional[typing.Text],
+        limit: int,
+        order: typing.Literal["asc", "desc"],
+        verbose: bool | None,
+    ) -> Pagination[DocumentType]:
+        """
+        Retrieve a paginated list of documents from the DuckDB database.
+        """
+        columns = list(DocumentType.model_json_schema()["properties"].keys())
+        columns_expr = ",".join(columns)
+
+        query = f"SELECT {columns_expr} FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
+        where_clauses: typing.List[typing.Text] = []
+        parameters: typing.List[typing.Text] = []
+
+        if after is not None and order == "asc":
+            where_clauses.append("document_id > ?")
+            parameters.append(after)
+        elif before is not None and order == "desc":
+            where_clauses.append("document_id < ?")
+            parameters.append(before)
+
+        if where_clauses:
+            query += "WHERE " + " AND ".join(where_clauses) + "\n"
+
+        query += f"ORDER BY document_id {order.upper()}\n"
+
+        # Fetch one more than the limit to determine if there are more results
+        fetch_limit = limit + 1
+        query += f"LIMIT {fetch_limit}"
+
+        if verbose:
+            self.dvs.settings.console.print(
+                "\nListing documents with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
+            )
+
+        results = self.dvs.conn.execute(query, parameters).fetchall()
+        results = [
+            {
+                column: (json.loads(value) if column == "metadata" else value)
+                for column, value in zip(columns, row)
+            }
+            for row in results
+        ]
+
+        documents = [DocumentType.model_validate(row) for row in results[:limit]]
+
+        out = Pagination.model_validate(
+            {
+                "data": documents,
+                "object": "list",
+                "first_id": documents[0].document_id if documents else None,
+                "last_id": documents[-1].document_id if documents else None,
+                "has_more": len(results) > limit,
+            }
+        )
+
+        return out
+
+    def _count(
+        self,
+        *,
+        document_id: typing.Optional[typing.Text],
+        content_md5: typing.Optional[typing.Text],
+        verbose: bool | None,
+    ) -> int:
+        """
+        Count the number of documents in the DuckDB database with optional filters.
+        """
+        query = f"SELECT COUNT(*) FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
+        where_clauses: typing.List[typing.Text] = []
+        parameters: typing.List[typing.Text] = []
+
+        if document_id is not None:
+            where_clauses.append("document_id = ?")
+            parameters.append(document_id)
+        if content_md5 is not None:
+            where_clauses.append("content_md5 = ?")
+            parameters.append(content_md5)
+
+        if where_clauses:
+            query += "WHERE " + " AND ".join(where_clauses) + "\n"
+
+        if verbose:
+            self.dvs.settings.console.print(
+                "\nCounting documents with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
+            )
+
+        result = self.dvs.conn.execute(query, parameters).fetchone()
+        count = result[0] if result else 0
+
+        return count
+
+    def _drop(self, *, verbose: bool | None = None) -> None:
+        """
+        Drop the documents table from the DuckDB database.
+        """  # noqa: E501
+        query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
+        query = query_template.render(table_name=dvs.DOCUMENTS_TABLE_NAME)
+
+        if verbose:
+            self.dvs.settings.console.print(
+                f"\nDropping table: '{dvs.DOCUMENTS_TABLE_NAME}' with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            )
+
+        # Drop table
+        self.dvs.conn.sql(query)
+
+        return None
