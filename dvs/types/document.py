@@ -60,12 +60,12 @@ class Document(pydantic.BaseModel):
         default_factory=dict,
         description="Additional metadata associated with the document.",
     )
-    created_at: typing.Optional[int] = pydantic.Field(
-        default=None,
+    created_at: int = pydantic.Field(
+        default_factory=lambda: int(time.time()),
         description="Unix timestamp of document creation.",
     )
-    updated_at: typing.Optional[int] = pydantic.Field(
-        default=None,
+    updated_at: int = pydantic.Field(
+        default_factory=lambda: int(time.time()),
         description="Unix timestamp of last document update.",
     )
 
@@ -96,7 +96,48 @@ class Document(pydantic.BaseModel):
         )
         return doc
 
-    def to_points(
+    @classmethod
+    def from_contents(
+        cls,
+        documents: typing.Union[
+            "Document",
+            typing.Iterable["Document"],
+            str,
+            typing.Iterable[str],
+            typing.Iterable[typing.Union["Document", str]],
+        ],
+    ) -> typing.List["Document"]:
+        """
+        Create documents from the contents.
+        """
+        # Validate documents
+        if isinstance(documents, str) or isinstance(documents, Document):
+            documents = [documents]
+
+        docs: list["Document"] = []
+        for idx, doc in enumerate(documents):
+            if isinstance(doc, str):
+                doc = str_or_none(doc)
+                if not doc:
+                    raise ValueError(f"Document [{idx}] content cannot be empty: {doc}")
+                doc = Document.model_validate(
+                    {
+                        "name": doc.split("\n")[0][:28],
+                        "content": doc,
+                        "content_md5": Document.hash_content(doc),
+                        "metadata": {
+                            "content_length": len(doc),
+                        },
+                        "created_at": int(time.time()),
+                        "updated_at": int(time.time()),
+                    }
+                )
+
+            docs.append(doc)
+
+        return docs
+
+    def to_points_with_contents(
         self,
         *,
         model: oai_emb_model.OpenAIEmbeddingsModel | None = None,
@@ -104,7 +145,7 @@ class Document(pydantic.BaseModel):
         with_embeddings: bool | None = None,
         metadata: typing.Optional[typing.Dict[typing.Text, typing.Any]] = None,
         verbose: bool | None = None,
-    ) -> typing.List["Point"]:
+    ) -> typing.Tuple[typing.List["Point"], typing.List[typing.Text]]:
         """
         Create points from the document.
         """
@@ -116,11 +157,12 @@ class Document(pydantic.BaseModel):
                 "Model and model_settings are required when with_embeddings is True"
             )
 
+        _content = self.content
         _meta = json.loads(json.dumps(metadata or {}, default=str))
         _pt_data = {
             "point_id": dvs.utils.ids.get_id("pt"),
             "document_id": self.document_id,
-            "content_md5": self.content_md5,
+            "content_md5": Document.hash_content(_content),
             "metadata": _meta,
         }
         _pt = Point.model_validate(_pt_data)
@@ -132,14 +174,18 @@ class Document(pydantic.BaseModel):
                     + "with_embeddings is True"
                 )
             emb_resp = model.get_embeddings(
-                input=self.content, model_settings=model_settings
+                input=_content, model_settings=model_settings
             )
             _pt.embedding = emb_resp.to_python()[0]
-        _pts = [_pt]
+
+        _pts_with_contents = ([_pt], [_content])
+
+        if len(_pts_with_contents[0]) != len(_pts_with_contents[1]):
+            raise ValueError("Number of points and contents of points must be the same")
 
         if verbose:
-            print(f"Created {len(_pts)} points")
-        return _pts
+            print(f"Created {len(_pts_with_contents[0])} points")
+        return _pts_with_contents
 
     @pydantic.model_validator(mode="after")
     def validate_string_fields(self) -> typing.Self:

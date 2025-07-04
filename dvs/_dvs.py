@@ -1,6 +1,5 @@
 import functools
 import pathlib
-import time
 import typing
 
 import duckdb
@@ -12,6 +11,7 @@ from dvs.config import Settings
 from dvs.types.document import Document
 from dvs.types.point import Point
 from dvs.types.search_request import SearchRequest
+from dvs.utils.chunk import chunks
 
 if typing.TYPE_CHECKING:
     from dvs.db.api import DB
@@ -58,8 +58,9 @@ class DVS:
             typing.Iterable[typing.Union[Document, str]],
         ],
         *,
-        debug: bool | None = None,
-    ) -> list[tuple[Document, list[Point]]]:
+        embeddings_batch_size: int = 500,
+        verbose: bool | None = None,
+    ) -> typing.Dict:
         """
         Add one or more documents to the vector similarity search database.
 
@@ -92,62 +93,48 @@ class DVS:
         - Large batches of documents may take significant time due to embedding generation
         - OpenAI API costs apply for generating embeddings
         """  # noqa: E501
-        raise NotImplementedError  # TODO: implement
 
-        debug = self.debug if debug is None else debug
+        verbose = self.verbose if verbose is None else verbose
         output: list[tuple[Document, list[Point]]] = []
 
         # Validate documents
-        if isinstance(documents, str) or isinstance(documents, Document):
-            documents = [documents]
-        docs: list["Document"] = []
-        for idx, doc in enumerate(documents):
-            if isinstance(doc, str):
-                doc = doc.strip()
-                if not doc:
-                    raise ValueError(f"Document [{idx}] content cannot be empty: {doc}")
-                doc = Document.model_validate(
-                    {
-                        "name": doc.split("\n")[0][:28],
-                        "content": doc,
-                        "content_md5": Document.hash_content(doc),
-                        "metadata": {
-                            "content_length": len(doc),
-                        },
-                        "created_at": int(time.time()),
-                        "updated_at": int(time.time()),
-                    }
-                )
-                doc = doc.strip()
-                docs.append(doc)
-            else:
-                doc = doc.strip()
-                if not doc.content.strip():
-                    raise ValueError(
-                        f"Document [{idx}] content cannot be empty: {doc.content}"
-                    )
-                docs.append(doc)
+        docs: list["Document"] = Document.from_contents(documents)
+        all_points: list[Point] = []
+        all_point_contents: list[str] = []
 
         # Collect documents and points
         for doc in docs:
-            points: list[Point] = doc.to_points()
-            output.append((doc, points))
+            points_with_contents: tuple[list[Point], list[str]] = (
+                doc.to_points_with_contents(with_embeddings=False)
+            )
+            output.append((doc, points_with_contents[0]))
+            all_points.extend(points_with_contents[0])
+            all_point_contents.extend(points_with_contents[1])
 
-        # Create embeddings
-        all_points = [pt for _, pts in output for pt in pts]
-        all_points = Point.set_embeddings_from_contents(
-            all_points,
-            docs,
-            openai_client=self.openai_client,
-            cache=self.cache,
-            debug=debug,
-        )
+        # Create documents into the database
+        self.db.documents.bulk_create(docs, verbose=verbose)
 
-        # Bulk create documents and points
-        docs = Document.objects.bulk_create(docs, conn=self.conn, debug=debug)
-        all_points = Point.objects.bulk_create(all_points, conn=self.conn, debug=debug)
+        # Create embeddings (assign embeddings to points in place)
+        for batch_points_with_contents in chunks(
+            zip(all_points, all_point_contents), batch_size=embeddings_batch_size
+        ):
+            Point.set_embeddings_from_contents(
+                [pt for pt, _ in batch_points_with_contents],
+                [c for _, c in batch_points_with_contents],
+                model=self.model,
+                model_settings=self.model_settings,
+            )
+            self.db.points.bulk_create(
+                [pt for pt, _ in batch_points_with_contents],
+                verbose=verbose,
+            )
 
-        return output
+        return {
+            "success": True,
+            "created_documents": len(docs),
+            "created_points": len(all_points),
+            "error": None,
+        }
 
     def remove(
         self,
