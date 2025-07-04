@@ -14,7 +14,7 @@ from dvs.types.point import Point
 from dvs.types.search_request import SearchRequest
 
 if typing.TYPE_CHECKING:
-    from dvs.resources.manifest.api import Manifest
+    from dvs.db.api import DB
     from dvs.types.manifest import Manifest as ManifestType
 
 
@@ -23,21 +23,19 @@ class DVS:
         self,
         settings: typing.Union[pathlib.Path, str] | Settings,
         *,
-        debug: bool = False,
         model_settings: oai_emb_model.ModelSettings | None = None,
         model: oai_emb_model.OpenAIEmbeddingsModel | str,
-        raise_if_exists: bool = False,
         touch: bool = True,
         verbose: bool = False,
     ):
         self.settings = self._ensure_dvs_settings(settings)
-        self.verbose = verbose or debug
+        self.verbose = verbose
         self.model = self._ensure_model(model)
         self.model_settings = model_settings or oai_emb_model.ModelSettings()
         self.db_manifest = self._ensure_manifest(self.model, self.model_settings)
 
         if touch:
-            self.touch(raise_if_exists=raise_if_exists, debug=debug)
+            self.db.touch(verbose=verbose)
 
     @property
     def db_path(self) -> pathlib.Path:
@@ -45,42 +43,10 @@ class DVS:
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
-        return duckdb.connect(self.db_path)  # Always open a new duckdb connection
-
-    def touch(self, *, raise_if_exists: bool = False, debug: bool | None = None):
         """
-        Initialize the DuckDB database tables required for vector similarity search.
-
-        This method creates the necessary database tables (documents and points) with proper
-        schemas and indexes. It installs required DuckDB extensions and sets up HNSW indexing
-        for efficient vector similarity searches.
-
-        Notes
-        -----
-        - Creates 'documents' table for storing document metadata and content
-        - Creates 'points' table for storing vector embeddings with HNSW indexing
-        - Installs required DuckDB extensions (e.g., JSON, httpfs)
-        - Sets up indexes for optimized query performance
-
-        Examples
-        --------
-        >>> dvs = DVS(duckdb_path="./data/vectors.duckdb")
-        >>> dvs.touch(raise_if_exists=True, debug=True)
-
-        Warnings
-        --------
-        If raise_if_exists=True and tables already exist, raises ConflictError
-        with status code 409.
-        """  # noqa: E501
-
-        debug = self.debug if debug is None else debug
-
-        Document.objects.touch(
-            conn=self.conn, raise_if_exists=raise_if_exists, debug=debug
-        )
-        Point.objects.touch(
-            conn=self.conn, raise_if_exists=raise_if_exists, debug=debug
-        )
+        Always open a new duckdb connection.
+        """
+        return duckdb.connect(self.db_path)
 
     def add(
         self,
@@ -126,6 +92,7 @@ class DVS:
         - Large batches of documents may take significant time due to embedding generation
         - OpenAI API costs apply for generating embeddings
         """  # noqa: E501
+        raise NotImplementedError  # TODO: implement
 
         debug = self.debug if debug is None else debug
         output: list[tuple[Document, list[Point]]] = []
@@ -214,6 +181,7 @@ class DVS:
         - This operation is irreversible and will permanently delete the documents
         - If a document ID doesn't exist, a NotFoundError will be raised
         """  # noqa: E501
+        raise NotImplementedError  # TODO: implement
 
         debug = self.debug if debug is None else debug
         doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
@@ -265,6 +233,7 @@ class DVS:
         - OpenAI API costs apply for generating query embeddings
         - Large top_k values may impact performance
         """  # noqa: E501
+        raise NotImplementedError  # TODO: implement
 
         query = query.strip()
         if not query:
@@ -296,10 +265,10 @@ class DVS:
         return results
 
     @functools.cached_property
-    def manifest(self) -> "Manifest":
-        from dvs.resources.manifest.api import Manifest
+    def db(self) -> "DB":
+        from dvs.db.api import DB
 
-        return Manifest(self)
+        return DB(self)
 
     def _ensure_dvs_settings(
         self, settings: typing.Union[pathlib.Path, str] | Settings
@@ -336,7 +305,7 @@ class DVS:
         """  # noqa: E501
 
         manifest: "ManifestType"
-        might_manifest = self.manifest.receive()
+        might_manifest = self.db.manifest.receive()
         if might_manifest is None:
             if model_settings.dimensions is None:
                 raise ValueError(
@@ -344,7 +313,7 @@ class DVS:
                     + "please provide the model settings."
                 )
             else:
-                manifest = self.manifest.create(
+                manifest = self.db.manifest.create(
                     ManifestType(
                         embedding_model=self.model.model,
                         embedding_dimensions=model_settings.dimensions,
