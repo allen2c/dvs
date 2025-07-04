@@ -1,21 +1,28 @@
 import typing
 
 import dvs
+import dvs.utils.openapi as openapi_utils
 from dvs.types.manifest import Manifest as ManifestType
-from dvs.utils.openapi import openapi_to_create_table_sql
+from dvs.utils.display import DISPLAY_SQL_QUERY
 
 
 class Manifest:
     def __init__(self, dvs: "dvs.DVS"):
         self.dvs = dvs
 
-    def touch(self) -> bool:
+    def touch(self, *, verbose: bool | None = None) -> bool:
         """
         Create the manifest table if it does not exist.
         """
-        create_table_sql = openapi_to_create_table_sql(
+        create_table_sql = openapi_utils.openapi_to_create_table_sql(
             ManifestType.model_json_schema(), table_name=dvs.MANIFEST_TABLE_NAME
         ).strip()
+
+        if verbose:
+            self.dvs.settings.console.print(
+                "\nCreating manifest table with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
+            )
 
         self.dvs.conn.sql(create_table_sql)
 

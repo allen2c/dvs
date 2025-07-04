@@ -2,6 +2,10 @@ import functools
 import typing
 
 import dvs
+from dvs.utils.display import DISPLAY_SQL_QUERY
+from dvs.utils.sql_stmts import (
+    SQL_STMT_INSTALL_EXTENSIONS,
+)
 
 if typing.TYPE_CHECKING:
     from dvs.db.documents.api import Documents
@@ -39,12 +43,26 @@ class DB:
         with status code 409.
         """  # noqa: E501
 
-        if not self.manifest.touch():
+        if not self.manifest.touch(verbose=verbose):
             raise ValueError("Failed to touch the manifest table")
-        if not self.documents.touch():
+        if not self.documents.touch(verbose=verbose):
             raise ValueError("Failed to touch the documents table")
-        if not self.points.touch():
+        if not self.points.touch(verbose=verbose):
             raise ValueError("Failed to touch the points table")
+        return True
+
+    def install_extensions(self, *, verbose: bool | None = None) -> bool:
+        """
+        Install required DuckDB extensions for the database.
+        """
+        verbose = self.dvs.verbose if verbose is None else verbose
+        if verbose:
+            self.dvs.settings.console.print(
+                "\nInstalling extensions with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=SQL_STMT_INSTALL_EXTENSIONS)}\n"
+            )
+        self.dvs.conn.sql(SQL_STMT_INSTALL_EXTENSIONS)
+
         return True
 
     @functools.cached_property
