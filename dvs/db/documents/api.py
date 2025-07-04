@@ -150,9 +150,9 @@ class Documents:
         with Timer() as timer:
             documents = [
                 (
-                    DocumentType.model_validate(doc).strip()
+                    DocumentType.model_validate(doc)
                     if isinstance(doc, typing.Dict)
-                    else doc.strip()
+                    else doc
                 )
                 for doc in documents
             ]
