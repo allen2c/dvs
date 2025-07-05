@@ -27,17 +27,18 @@ class DVS:
         *,
         model_settings: oai_emb_model.ModelSettings | None = None,
         model: oai_emb_model.OpenAIEmbeddingsModel | str,
-        touch: bool = True,
-        verbose: bool = False,
+        verbose: bool | None = None,
     ):
         self.settings = self._ensure_dvs_settings(settings)
-        self.verbose = verbose
+        self.verbose = verbose or False
         self.model = self._ensure_model(model)
         self.model_settings = model_settings or oai_emb_model.ModelSettings()
-        self.db_manifest = self._ensure_manifest(self.model, self.model_settings)
 
-        if touch:
-            self.db.touch(verbose=verbose)
+        self.db.touch(verbose=verbose)
+
+        self.db_manifest = self._ensure_manifest(
+            self.model, self.model_settings, verbose=self.verbose
+        )
 
     @property
     def db_path(self) -> pathlib.Path:
@@ -285,6 +286,7 @@ class DVS:
         self,
         model: oai_emb_model.OpenAIEmbeddingsModel,
         model_settings: oai_emb_model.ModelSettings,
+        verbose: bool,
     ) -> "ManifestType":
         """
         Ensure the manifest of the database is consistent with the model and model settings.
@@ -293,7 +295,7 @@ class DVS:
         """  # noqa: E501
 
         manifest: "ManifestType"
-        might_manifest = self.db.manifest.receive()
+        might_manifest = self.db.manifest.receive(verbose=verbose)
         if might_manifest is None:
             if model_settings.dimensions is None:
                 raise ValueError(
@@ -305,7 +307,8 @@ class DVS:
                     ManifestType(
                         embedding_model=self.model.model,
                         embedding_dimensions=model_settings.dimensions,
-                    )
+                    ),
+                    verbose=verbose,
                 )
         else:
             manifest = might_manifest
