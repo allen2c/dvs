@@ -1,6 +1,9 @@
-from typing import Dict, Optional, Sequence, Text
+import logging
+import typing
 
 from dvs.utils.sql_stmts import SQL_STMT_CREATE_INDEX
+
+logger = logging.getLogger(__name__)
 
 COLUMN_DECLARATION_LINE = "{field_name} {sql_type} {not_null} {unique}"
 DECLARATION_INDENT = "    "
@@ -19,13 +22,14 @@ JSON_TO_SQL_TYPE_MAP = {
 
 # Function to generate SQL CREATE TABLE statement with JSON support
 def openapi_to_create_table_sql(
-    schema: Dict,
+    schema: typing.Dict,
     *,
-    table_name: Text,
-    primary_key: Optional[Text] = None,
-    unique_fields: Optional[Sequence[Text]] = None,
-    indexes: Optional[Sequence[Text]] = None,
-) -> Text:
+    table_name: typing.Text,
+    primary_key: typing.Optional[typing.Text] = None,
+    unique_fields: typing.Optional[typing.Sequence[typing.Text]] = None,
+    indexes: typing.Optional[typing.Sequence[typing.Text]] = None,
+    custom_sql_types: typing.Optional[typing.Dict[typing.Text, typing.Text]] = None,
+) -> typing.Text:
     unique_fields = unique_fields or []
     indexes = indexes or []
 
@@ -35,8 +39,12 @@ def openapi_to_create_table_sql(
     for field_name, field_info in schema["properties"].items():
         field_type = field_info.get("type")
 
+        # Handle custom SQL types
+        if custom_sql_types and field_name in custom_sql_types:
+            sql_type = custom_sql_types[field_name]
+
         # Handle array types
-        if field_type == "array":
+        elif field_type == "array":
             # Detect the type of the array items (e.g., FLOAT[384])
             items_type = field_info["items"]["type"]
             array_size = field_info.get(
@@ -52,6 +60,11 @@ def openapi_to_create_table_sql(
         # Handle VARCHAR for string types with maxLength
         elif "maxLength" in field_info and field_type == "string":
             sql_type = f"VARCHAR({field_info['maxLength']})"
+
+        # Handle null types
+        elif field_type is None:
+            logger.warning(f"Field {field_name} has no type, defaulting to TEXT")
+            sql_type = "TEXT"
 
         # Handle regular types (including JSON)
         else:

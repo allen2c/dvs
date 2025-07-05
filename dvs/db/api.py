@@ -63,8 +63,8 @@ class DB:
 
         return True
 
-    def show_tables(self) -> typing.Tuple[typing.Text, ...]:
-        res: typing.List[typing.Tuple[typing.Text]] = self.dvs.conn.sql(
+    def show_table_names(self) -> typing.Tuple[typing.Text, ...]:
+        res: typing.List[typing.Tuple[typing.Text]] = self.dvs.conn.execute(
             SQL_STMT_SHOW_TABLES
         ).fetchall()
         return tuple(r[0] for r in res)

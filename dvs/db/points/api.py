@@ -577,6 +577,9 @@ class Points:
             table_name=dvs.POINTS_TABLE_NAME,
             primary_key="point_id",
             indexes=["document_id", "content_md5"],
+            custom_sql_types={
+                "embedding": f"FLOAT[{self.dvs.db_manifest.embedding_dimensions}]"
+            },
         ).strip()
         create_table_sql = (
             SQL_STMT_INSTALL_EXTENSIONS
