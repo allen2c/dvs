@@ -30,23 +30,8 @@ class Documents:
     def touch(self, *, verbose: bool | None = None) -> bool:
         """
         Ensure the existence of the documents table in the DuckDB database.
-
-        This method checks if the documents table exists in the database. If it does not exist,
-        it creates the table using the model's JSON schema. If the table already exists and
-        `raise_if_exists` is set to True, a `ConflictError` is raised. The method also installs
-        necessary JSON and VSS extensions before creating the table.
-
-        Notes
-        -----
-        - The table is created with `document_id` as the primary key and an index on `content_md5`.
-        - Debug mode provides SQL query details and timing information.
-        - The function returns True upon successful execution.
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Document.objects.touch(conn=conn, raise_if_exists=True, debug=True)
-        """  # noqa: E501
+        Creates the table if it doesn't exist, installs necessary extensions.
+        """
         with Timer() as timer:
             self._touch(verbose=verbose)
 
@@ -61,25 +46,7 @@ class Documents:
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
-
-        This function queries the database to fetch a document based on the provided
-        document ID. It can optionally include the document's embedding vector in the
-        result. If the document is not found, a `NotFoundError` is raised.
-
-        Notes
-        -----
-        - The function uses the model's JSON schema to determine the columns to select.
-        - Debug mode provides SQL query details and timing information.
-        - The document's metadata is parsed from JSON format before validation.
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> document = Document.objects.retrieve(
-        ...     document_id='doc_123',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
+        Raises NotFoundError if the document doesn't exist.
         """
         with Timer() as timer:
             out = self._retrieve(document_id, verbose=verbose)
@@ -96,20 +63,8 @@ class Documents:
     ) -> DocumentType:
         """
         Create a single document in the DuckDB database.
-
-        This method wraps the `bulk_create` function to insert a single document into the database. It accepts either a `Document` instance or a dictionary representing the document data. The function returns the created `Document` object.
-
-        Notes
-        -----
-        - The function uses the `bulk_create` method to handle the insertion, ensuring consistency with batch operations.
-        - Debug mode can be enabled to print SQL query details and timing information.
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> document = Document(name='doc_123', content='Sample content')
-        >>> created_doc = Point.objects.create(document, conn=conn, debug=True)
-        """  # noqa: E501
+        Accepts either a Document instance or a dictionary.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             docs = self.bulk_create([document], verbose=verbose)
@@ -131,21 +86,8 @@ class Documents:
     ) -> typing.List[DocumentType]:
         """
         Insert multiple documents into the DuckDB database.
-
-        This function takes a sequence of documents, which can be either instances of the
-        `Document` class or dictionaries, and inserts them into the specified DuckDB table.
-        It validates and processes each document according to the model's schema before
-        performing the bulk insertion.
-
-        The function supports debugging mode, which provides detailed SQL query information
-        and execution timing.
-
-        Notes
-        -----
-        - The function uses parameterized queries to prevent SQL injection.
-        - The execution time is printed in seconds if it exceeds one second, otherwise in milliseconds.
-        - The function returns the list of documents that were inserted.
-        """  # noqa: E501
+        Validates and processes each document before bulk insertion.
+        """
         with Timer() as timer:
             documents = [
                 (
@@ -170,16 +112,7 @@ class Documents:
     def remove(self, document_id: typing.Text, *, verbose: bool | None = None) -> None:
         """
         Remove a document from the DuckDB database by its ID.
-
-        This function executes a DELETE SQL statement to remove a document
-        identified by the given `document_id` from the specified DuckDB table.
-        It provides an option to output debug information, including the SQL
-        query and execution time.
-
-        Notes
-        -----
-        - The function uses parameterized queries to prevent SQL injection.
-        - Debug mode provides SQL query details and timing information.
+        Uses parameterized queries to prevent SQL injection.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
@@ -202,33 +135,7 @@ class Documents:
     ) -> Pagination[DocumentType]:
         """
         Retrieve a paginated list of documents from the DuckDB database.
-
-        This function constructs and executes a SQL query to fetch documents from the
-        database, with optional filtering based on document ID. It supports pagination
-        by allowing the caller to specify a limit on the number of documents returned
-        and whether to order the results in ascending or descending order.
-
-        The function also provides an option to output debug information, including
-        the SQL query and execution time.
-
-        Notes
-        -----
-        - The function uses parameterized queries to prevent SQL injection.
-        - The `after` and `before` parameters are mutually exclusive and determine
-        the starting point for the pagination.
-        - The function fetches one more document than the specified limit to check
-        if there are more results available.
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> pagination = Document.objects.list(
-        ...     after='doc_123',
-        ...     limit=10,
-        ...     order='asc',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
+        Supports filtering by content_md5 and cursor-based pagination.
         """
         with Timer() as timer:
             out = self._list(
@@ -257,28 +164,8 @@ class Documents:
     ) -> typing.Generator[DocumentType, None, None]:
         """
         Generate and yield documents from the DuckDB database with pagination support.
-
-        A generator wrapper around the list() method that handles pagination automatically,
-        yielding individual documents until all matching records have been retrieved. This is
-        useful for processing large result sets without loading all documents into memory at once.
-
-        Notes
-        -----
-        - Automatically handles pagination using cursor-based pagination with document_id
-        - Memory efficient as it yields documents one at a time
-        - Maintains the same filtering and ordering capabilities as the list() method
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> for document in Document.objects.gen(
-        ...     limit=100,
-        ...     conn=conn,
-        ...     debug=True
-        ... ):
-        ...     process_document(document)
-        """  # noqa: E501
-
+        Memory efficient generator that automatically handles pagination.
+        """
         has_more = True
         current_after = after
         while has_more:
@@ -303,16 +190,8 @@ class Documents:
         verbose: bool | None = None,
     ) -> int:
         """
-        Count the number of documents in the DuckDB database with optional filters.
-
-        This function executes a SQL COUNT query on the documents table, allowing
-        optional filtering by `document_id` and `content_md5`. It provides an option
-        to output debug information, including the SQL query and execution time.
-
-        Notes
-        -----
-        - The function uses parameterized queries to prevent SQL injection.
-        - Debug mode provides SQL query details and timing information.
+        Count the number of documents in the DuckDB database.
+        Supports optional filtering by document_id and content_md5.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
@@ -355,30 +234,9 @@ class Documents:
     ) -> None:
         """
         Drop the documents table from the DuckDB database.
-
-        This method deletes the entire documents table, including all its data and associated
-        indexes or constraints. It requires explicit confirmation through the `force` parameter
-        to prevent accidental data loss.
-
-        Notes
-        -----
-        - The operation is irreversible and will permanently delete all data in the table.
-        - Debug mode provides SQL query details and timing information.
-
-        Warnings
-        --------
-        This operation is irreversible and will permanently delete all documents data.
-        Use with caution.
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Document.objects.drop(conn=conn, force=True, debug=True)
-        Dropping table: 'documents' with SQL:
-        ...
-        Dropped table: 'documents' in 1.234 ms
-        """  # noqa: E501
-
+        Requires force=True to prevent accidental data loss.
+        Optionally recreates the table after dropping.
+        """
         if not force:
             raise ValueError("Use force=True to drop table.")
 

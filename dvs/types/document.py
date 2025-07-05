@@ -6,7 +6,6 @@ import openai_embeddings_model as oai_emb_model
 import pydantic
 from str_or_none import str_or_none
 
-import dvs.utils.hash
 import dvs.utils.ids
 
 if typing.TYPE_CHECKING:
@@ -68,6 +67,8 @@ class Document(pydantic.BaseModel):
 
     @classmethod
     def hash_content(cls, content: typing.Text) -> typing.Text:
+        import dvs.utils.hash
+
         return dvs.utils.hash.hash_content(content)
 
     @classmethod

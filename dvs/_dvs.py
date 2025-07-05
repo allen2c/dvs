@@ -73,35 +73,8 @@ class DVS:
     ) -> typing.Dict:
         """
         Add one or more documents to the vector similarity search database.
-
-        This method processes input documents (either as raw text or Document objects),
-        generates vector embeddings using OpenAI's API, and stores both documents and
-        their vector points in DuckDB for similarity searching.
-
-        Notes
-        -----
-        - Input documents are automatically stripped of whitespace
-        - Empty documents will raise ValueError
-        - For text inputs, document name is derived from first line (truncated to 28 chars)
-        - Embeddings are cached to improve performance on repeated content
-        - Documents and points are created in bulk transactions for efficiency
-
-        Examples
-        --------
-        >>> dvs = DVS()
-        >>> # Add single document
-        >>> dvs.add("This is a sample document")
-        >>> # Add multiple documents
-        >>> docs = [
-        ...     "First document content",
-        ...     Document(name="doc2", content="Second document")
-        ... ]
-        >>> dvs.add(docs)
-
-        Warnings
-        --------
-        - Large batches of documents may take significant time due to embedding generation
-        - OpenAI API costs apply for generating embeddings
+        Processes documents, generates embeddings via OpenAI API, and stores in DuckDB.
+        Returns dict with creation stats and ignores duplicates if ignore_same_content=True.
         """  # noqa: E501
 
         verbose = self.verbose if verbose is None else verbose
@@ -177,29 +150,8 @@ class DVS:
     ) -> None:
         """
         Remove one or more documents and their associated vector points from the database.
-
-        This method deletes the specified documents and all their corresponding vector points
-        from the DuckDB database. It ensures that both the document data and associated
-        vector embeddings are properly cleaned up.
-
-        Notes
-        -----
-        - Accepts either a single document ID or an iterable of document IDs
-        - Removes both document metadata and associated vector points
-        - Operations are performed sequentially for each document ID
-
-        Examples
-        --------
-        >>> dvs = DVS()
-        >>> # Remove single document
-        >>> dvs.remove("doc-123abc")
-        >>> # Remove multiple documents
-        >>> dvs.remove(["doc-123abc", "doc-456def"])
-
-        Warnings
-        --------
-        - This operation is irreversible and will permanently delete the documents
-        - If a document ID doesn't exist, a NotFoundError will be raised
+        Accepts single document ID or iterable of IDs and deletes both documents and points.
+        Operation is irreversible and raises NotFoundError if document ID doesn't exist.
         """  # noqa: E501
         verbose = self.verbose if verbose is None else verbose
         doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
@@ -219,35 +171,9 @@ class DVS:
         verbose: bool | None = None,
     ) -> list[tuple["Point", "Document", float]]:
         """
-        Perform an asynchronous vector similarity search using text query.
-
-        This method converts the input text query into a vector embedding using OpenAI's API,
-        then searches for similar documents in the DuckDB database using cosine similarity.
-        Results are returned as tuples containing the matched point, associated document,
-        and relevance score.
-
-        Notes
-        -----
-        - Query text is automatically stripped of whitespace
-        - Empty queries will raise ValueError
-        - Embeddings are cached to improve performance on repeated queries
-        - Results are ordered by descending relevance score (cosine similarity)
-
-        Examples
-        --------
-        >>> dvs = DVS()
-        >>> results = await dvs.search(
-        ...     query="What is machine learning?",
-        ...     top_k=3,
-        ...     with_embedding=False
-        ... )
-        >>> for point, document, score in results:
-        ...     print(f"Score: {score:.3f}, Doc: {document.name}")
-
-        Warnings
-        --------
-        - OpenAI API costs apply for generating query embeddings
-        - Large top_k values may impact performance
+        Perform asynchronous vector similarity search using text query.
+        Converts query to embedding via OpenAI API and searches DuckDB using cosine similarity.
+        Returns list of tuples containing matched point, document, and relevance score.
         """  # noqa: E501
 
         verbose = self.verbose if verbose is None else verbose
@@ -317,9 +243,9 @@ class DVS:
         verbose: bool,
     ) -> "ManifestType":
         """
-        Ensure the manifest of the database is consistent with the model and model settings.
-
-        Set dimensions to model settings if None in place.
+        Ensure database manifest is consistent with model and model settings.
+        Creates manifest if missing or validates existing one against current model.
+        Sets dimensions in model_settings if None and returns the manifest.
         """  # noqa: E501
         from dvs.types.manifest import Manifest as ManifestType
 

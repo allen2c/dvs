@@ -20,6 +20,7 @@ class Manifest:
     def touch(self, *, verbose: bool | None = None) -> bool:
         """
         Create the manifest table if it does not exist.
+        Returns True when table creation is completed successfully.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
 
@@ -35,6 +36,7 @@ class Manifest:
     def receive(self, *, verbose: bool | None = None) -> ManifestType | None:
         """
         Retrieve the manifest from the DuckDB database.
+        Returns None if no manifest record exists.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
 
@@ -51,7 +53,8 @@ class Manifest:
         self, manifest: ManifestType, *, verbose: bool | None = None
     ) -> ManifestType:
         """
-        Create a manifest record in the DuckDB database.
+        Insert a new manifest record into the DuckDB database.
+        Returns the created manifest instance.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
 
@@ -66,7 +69,8 @@ class Manifest:
 
     def _touch(self, *, verbose: bool | None = None) -> bool:
         """
-        Create the manifest table if it does not exist.
+        Internal method to create the manifest table if it does not exist.
+        Handles table creation SQL generation and execution.
         """
         create_table_sql = openapi_utils.openapi_to_create_table_sql(
             ManifestType.model_json_schema(), table_name=dvs.MANIFEST_TABLE_NAME
@@ -90,7 +94,8 @@ class Manifest:
 
     def _receive(self, *, verbose: bool | None = None) -> ManifestType | None:
         """
-        Retrieve the manifest from the DuckDB database.
+        Internal method to retrieve the manifest from the DuckDB database.
+        Executes SELECT query and validates the result as ManifestType.
         """
         columns = list(ManifestType.model_json_schema()["properties"].keys())
         columns_expr = ",".join(columns)
@@ -117,7 +122,8 @@ class Manifest:
         self, manifest: ManifestType, *, verbose: bool | None = None
     ) -> ManifestType:
         """
-        Create a manifest record in the DuckDB database.
+        Internal method to insert a manifest record into the DuckDB database.
+        Executes INSERT query with manifest data as parameters.
         """
         columns = list(manifest.model_json_schema()["properties"].keys())
         columns_expr = ", ".join(columns)

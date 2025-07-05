@@ -5,7 +5,6 @@ import typing
 import openai_embeddings_model as oai_emb_model
 import pydantic
 
-import dvs.utils.chunk
 import dvs.utils.ids
 
 if typing.TYPE_CHECKING:

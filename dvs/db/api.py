@@ -18,29 +18,9 @@ class DB:
     def touch(self, *, verbose: bool | None = None) -> bool:
         """
         Initialize the DuckDB database tables required for vector similarity search.
-
-        This method creates the necessary database tables (documents and points) with proper
-        schemas and indexes. It installs required DuckDB extensions and sets up HNSW indexing
-        for efficient vector similarity searches.
-
-        Notes
-        -----
-        - Creates 'documents' table for storing document metadata and content
-        - Creates 'points' table for storing vector embeddings with HNSW indexing
-        - Installs required DuckDB extensions (e.g., JSON, httpfs)
-        - Sets up indexes for optimized query performance
-
-        Examples
-        --------
-        >>> dvs = DVS(duckdb_path="./data/vectors.duckdb")
-        >>> dvs.touch(raise_if_exists=True, debug=True)
-
-        Warnings
-        --------
-        If raise_if_exists=True and tables already exist, raises ConflictError
-        with status code 409.
-        """  # noqa: E501
-
+        Creates manifest, documents, and points tables with proper schemas and indexes.
+        Installs required DuckDB extensions and sets up HNSW indexing for searches.
+        """
         if not self.manifest.touch(verbose=verbose):
             raise ValueError("Failed to touch the manifest table")
         if not self.documents.touch(verbose=verbose):
@@ -64,6 +44,9 @@ class DB:
         return True
 
     def show_table_names(self) -> typing.Tuple[typing.Text, ...]:
+        """
+        Return the names of all tables in the database.
+        """
         res: typing.List[typing.Tuple[typing.Text]] = self.dvs.conn.execute(
             SQL_STMT_SHOW_TABLES
         ).fetchall()
@@ -71,18 +54,27 @@ class DB:
 
     @functools.cached_property
     def manifest(self) -> "Manifest":
+        """
+        Access the manifest table API for managing database metadata.
+        """
         from dvs.db.manifest.api import Manifest
 
         return Manifest(self.dvs)
 
     @functools.cached_property
     def documents(self) -> "Documents":
+        """
+        Access the documents table API for managing document storage.
+        """
         from dvs.db.documents.api import Documents
 
         return Documents(self.dvs)
 
     @functools.cached_property
     def points(self) -> "Points":
+        """
+        Access the points table API for managing vector embeddings.
+        """
         from dvs.db.points.api import Points
 
         return Points(self.dvs)

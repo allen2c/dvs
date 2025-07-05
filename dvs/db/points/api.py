@@ -38,34 +38,9 @@ class Points:
 
     def touch(self, *, verbose: bool | None = None) -> bool:
         """
-        Initialize the points table in DuckDB with required extensions and indexes for vector similarity search.
-
-        This method creates the points table with proper schema derived from the Point model,
-        sets up HNSW indexing for vector similarity search, and installs necessary DuckDB
-        extensions. The table structure includes columns for point_id (primary key),
-        document_id, content_md5, and embedding vectors.
-
-        Notes
-        -----
-        - Creates indexes on document_id and content_md5 columns for faster lookups
-        - Installs JSON extension for metadata handling
-        - Sets up HNSW (Hierarchical Navigable Small World) index for efficient vector search
-        - Enables experimental HNSW persistence for index durability
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Point.objects.touch(conn=conn, debug=True)
-        Creating table: 'points' with SQL:
-        ...
-        Created table: 'points' in 123.456 ms
-        True
-
-        Warnings
-        --------
-        If raise_if_exists=True and the table already exists, raises ConflictError
-        with status code 409.
-        """  # noqa: E501
+        Initialize the points table in DuckDB with vector similarity search support.
+        Creates the table with proper schema, indexes, and HNSW indexing for embeddings.
+        """
         with Timer() as timer:
             self._touch(verbose=verbose)
         if verbose:
@@ -81,35 +56,9 @@ class Points:
         with_embedding: bool = False,
     ) -> "PointType":
         """
-        Retrieve a single point from the DuckDB database by its ID.
-
-        This method fetches a point record from the database, optionally including its embedding
-        vector, and validates the data against the Point model schema. If the point is not found,
-        raises a NotFoundError.
-
-        Notes
-        -----
-        - When with_embedding=False, the embedding vector is excluded from the query results
-        to reduce data transfer
-        - Debug mode provides SQL query details and timing information
-        - The point's metadata is automatically parsed from JSON format
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> point = Point.objects.retrieve(
-        ...     point_id='pt_123',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
-        Retrieving point: 'pt_123' with SQL:
-        ...
-        Retrieved point: 'pt_123' in 1.234 ms
-
-        Warnings
-        --------
-        Raises NotFoundError with status code 404 if the point_id doesn't exist in the database.
-        """  # noqa: E501
+        Retrieve a single point from the database by its ID.
+        Raises NotFoundError if the point doesn't exist.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             out = self._retrieve(
@@ -128,30 +77,9 @@ class Points:
         verbose: bool | None = None,
     ) -> "PointType":
         """
-        Create a single point in the DuckDB database.
-
-        A convenience method that wraps bulk_create for single point insertion. The point
-        must be properly embedded before creation.
-
-        Notes
-        -----
-        - The point's embedding vector must be set before calling this method
-        - Debug mode provides SQL query details and timing information
-        - The point's metadata is automatically handled as JSON in the database
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> point = Point(point_id='pt_123', embedding=[0.1, 0.2, ...])
-        >>> created_point = Point.objects.create(point=point, conn=conn, debug=True)
-        Creating points with SQL:
-        ...
-        Created 1 points in 1.234 ms
-
-        Warnings
-        --------
-        Raises ValueError if the point is not embedded before creation.
-        """  # noqa: E501
+        Create a single point in the database.
+        The point must have a valid embedding vector before creation.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         point = (
             PointType.model_validate(point) if isinstance(point, typing.Dict) else point
@@ -178,37 +106,9 @@ class Points:
         verbose: bool | None = None,
     ) -> typing.List["PointType"]:
         """
-        Create multiple points in the DuckDB database in batches.
-
-        This method efficiently inserts multiple Point records into the database, validating
-        each point and ensuring they have proper embeddings. Points are inserted in batches
-        to optimize performance.
-
-        Notes
-        -----
-        - Points must be embedded before creation (have valid embedding vectors)
-        - Points can be provided as Point objects or dictionaries
-        - Batch processing helps manage memory usage for large datasets
-        - Debug mode provides SQL query details and progress bar
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> points = [Point(point_id='pt_1', embedding=[...]), Point(point_id='pt_2', embedding=[...])]
-        >>> created_points = Point.objects.bulk_create(
-        ...     points=points,
-        ...     conn=conn,
-        ...     batch_size=100,
-        ...     debug=True
-        ... )
-        Creating points with SQL:
-        ...
-        Created 2 points in 1.234 ms
-
-        Warnings
-        --------
-        Raises ValueError if any point in the sequence is not properly embedded.
-        """  # noqa: E501
+        Create multiple points in the database efficiently using batches.
+        All points must have valid embedding vectors before creation.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         points = [
             PointType.model_validate(p) if isinstance(p, typing.Dict) else p
@@ -232,26 +132,9 @@ class Points:
 
     def remove(self, point_id: typing.Text, *, verbose: bool | None = None) -> None:
         """
-        Delete a single point from the DuckDB database by its ID.
-
-        Notes
-        -----
-        - Executes a DELETE SQL statement targeting a specific point_id
-        - Debug mode provides SQL query details and timing information
-        - No error is raised if the point doesn't exist
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Point.objects.remove(
-        ...     point_id='pt_123',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
-        Deleting point: 'pt_123' with SQL:
-        ...
-        Deleted point: 'pt_123' in 1.234 ms
-        """  # noqa: E501
+        Delete a single point from the database by its ID.
+        No error is raised if the point doesn't exist.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             self._remove(point_id, verbose=verbose)
@@ -275,35 +158,9 @@ class Points:
         verbose: bool | None = None,
     ) -> Pagination["PointType"]:
         """
-        List and paginate points from the DuckDB database with optional filtering.
-
-        Notes
-        -----
-        - Supports filtering by document_id and content_md5
-        - Implements cursor-based pagination using point_id
-        - Can exclude embedding vectors to reduce response size
-        - Orders results by point_id in ascending or descending order
-        - Debug mode provides SQL query details and timing information
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> points = Point.objects.list(
-        ...     document_id='doc_123',
-        ...     limit=10,
-        ...     order='asc',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
-        Listing points with SQL:
-        ...
-        Listed points in 1.234 ms
-
-        Warnings
-        --------
-        Including embeddings (with_embedding=True) can significantly increase response size
-        and processing time for large result sets.
-        """  # noqa: E501
+        List and paginate points with optional filtering by document_id and content_md5.
+        Uses cursor-based pagination with point_id for efficient large result sets.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             out = self._list(
@@ -339,29 +196,9 @@ class Points:
         verbose: bool | None = None,
     ) -> typing.Generator["PointType", None, None]:
         """
-        Generate and yield points from the DuckDB database with pagination support.
-
-        A generator wrapper around the list() method that handles pagination automatically,
-        yielding individual points until all matching records have been retrieved. This is
-        useful for processing large result sets without loading all points into memory at once.
-
-        Notes
-        -----
-        - Automatically handles pagination using cursor-based pagination with point_id
-        - Memory efficient as it yields points one at a time
-        - Maintains the same filtering and ordering capabilities as the list() method
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> for point in Point.objects.gen(
-        ...     document_id='doc_123',
-        ...     limit=100,
-        ...     conn=conn,
-        ...     debug=True
-        ... ):
-        ...     process_point(point)
-        """  # noqa: E501
+        Generate points with automatic pagination for memory-efficient processing.
+        Yields individual points while handling pagination internally.
+        """
 
         has_more = True
         after = None
@@ -390,26 +227,8 @@ class Points:
         verbose: bool | None = None,
     ) -> int:
         """
-        Count points in the DuckDB database with optional filtering by document_id and content_md5.
-
-        Notes
-        -----
-        - Executes a COUNT SQL query on the points table
-        - Supports filtering by document_id and/or content_md5
-        - Debug mode provides SQL query details and timing information
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> count = Point.objects.count(
-        ...     document_id='doc_123',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
-        Counting points with SQL:
-        ...
-        Counted points in 1.234 ms
-        """  # noqa: E501
+        Count points in the database with optional filtering.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             count = self._count(
@@ -431,30 +250,8 @@ class Points:
         verbose: bool | None = None,
     ) -> None:
         """
-        Drop the points table from the DuckDB database.
-
-        Notes
-        -----
-        - Requires explicit force=True parameter as a safety measure
-        - Debug mode provides SQL query details and timing information
-        - Drops the table and all associated indexes/constraints
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Point.objects.drop(
-        ...     conn=conn,
-        ...     force=True,
-        ...     debug=True
-        ... )
-        Dropping table: 'points' with SQL:
-        ...
-        Dropped table: 'points' in 1.234 ms
-
-        Warnings
-        --------
-        This operation is irreversible and will permanently delete all points data.
-        Use with caution.
+        Drop the points table from the database.
+        Requires force=True as a safety measure. This operation is irreversible.
         """
 
         if not force:
@@ -479,32 +276,9 @@ class Points:
         verbose: bool | None = None,
     ) -> None:
         """
-        Remove outdated points associated with a document based on content hash.
-
-        This method deletes all points belonging to a specific document that don't match
-        the provided content_md5 hash, effectively cleaning up outdated vector embeddings
-        when document content changes.
-
-        Notes
-        -----
-        - Executes a DELETE SQL statement targeting points with matching document_id
-        but different content_md5
-        - Debug mode provides SQL query details and timing information
-        - No error is raised if no points are deleted
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Point.objects.remove_outdated(
-        ...     document_id='doc_123',
-        ...     content_md5='abc123',
-        ...     conn=conn,
-        ...     debug=True
-        ... )
-        Removing outdated points with SQL:
-        ...
-        Deleted outdated points of document: 'doc_123' in 1.234 ms
-        """  # noqa: E501
+        Remove outdated points for a document that don't match the current content hash.
+        Cleans up old vector embeddings when document content changes.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             self._remove_outdated(
@@ -529,28 +303,9 @@ class Points:
         verbose: bool | None = None,
     ) -> None:
         """
-        Delete multiple points from the database based on point IDs, document IDs, or content hashes.
-
-        Notes
-        -----
-        - Accepts lists of point_ids, document_ids, or content_md5s for bulk deletion
-        - Uses OR conditions between different identifier types (any match will be deleted)
-        - Debug mode provides SQL query details and timing information
-        - No error is raised if points don't exist
-
-        Examples
-        --------
-        >>> conn = duckdb.connect('database.duckdb')
-        >>> Point.objects.remove_many(
-        ...     point_ids=['pt_1', 'pt_2'],
-        ...     document_ids=['doc_1'],
-        ...     conn=conn,
-        ...     debug=True
-        ... )
-        Removing points with SQL:
-        ...
-        Deleted points in 1.234 ms
-        """  # noqa: E501
+        Delete multiple points by point IDs, document IDs, or content hashes.
+        Uses OR conditions between different identifier types.
+        """
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             self._remove_many(
@@ -568,7 +323,7 @@ class Points:
 
     def _touch(self, *, verbose: bool | None = None) -> bool:
         """
-        Initialize the points table in DuckDB with required extensions and indexes for vector similarity search.
+        Initialize the points table with extensions and vector similarity search indexes.
         """  # noqa: E501
         # Install JSON and VSS extensions
         self.dvs.db.install_extensions(verbose=verbose)
@@ -621,7 +376,7 @@ class Points:
         with_embedding: bool,
     ) -> "PointType":
         """
-        Retrieve a single point from the DuckDB database by its ID.
+        Retrieve a single point from the database by its ID.
         """
         # Get columns
         columns = list(PointType.model_json_schema()["properties"].keys())
@@ -661,7 +416,7 @@ class Points:
         batch_size: int,
     ) -> typing.List["PointType"]:
         """
-        Create multiple points in the DuckDB database in batches.
+        Create multiple points in the database using batched inserts.
         """
 
         if not points:
@@ -724,8 +479,8 @@ class Points:
 
     def _remove(self, point_id: typing.Text, *, verbose: bool | None) -> None:
         """
-        Delete a single point from the DuckDB database by its ID.
-        """  # noqa: E501
+        Delete a single point from the database by its ID.
+        """
 
         query = (
             SQL_STMT_INSTALL_EXTENSIONS
@@ -756,8 +511,8 @@ class Points:
         verbose: bool | None,
     ) -> Pagination["PointType"]:
         """
-        List and paginate points from the DuckDB database with optional filtering.
-        """  # noqa: E501
+        List and paginate points with optional filtering.
+        """
         columns = list(PointType.model_json_schema()["properties"].keys())
         if not with_embedding:
             columns = [c for c in columns if c != "embedding"]
@@ -826,8 +581,8 @@ class Points:
         verbose: bool | None,
     ) -> int:
         """
-        Count points in the DuckDB database with optional filtering by document_id and content_md5.
-        """  # noqa: E501
+        Count points in the database with optional filtering.
+        """
         query = f"SELECT COUNT(*) FROM {dvs.POINTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
@@ -856,7 +611,7 @@ class Points:
 
     def _drop(self, *, verbose: bool | None) -> None:
         """
-        Drop the points table from the DuckDB database.
+        Drop the points table from the database.
         """
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
         query = query_template.render(table_name=dvs.POINTS_TABLE_NAME)
@@ -879,7 +634,7 @@ class Points:
         verbose: bool | None,
     ) -> None:
         """
-        Remove outdated points associated with a document based on content hash.
+        Remove outdated points for a document based on content hash.
         """
         query_template = jinja2.Template(SQL_STMT_REMOVE_OUTDATED_POINTS)
         query = query_template.render(table_name=dvs.POINTS_TABLE_NAME)
@@ -906,8 +661,8 @@ class Points:
         verbose: bool | None,
     ) -> None:
         """
-        Delete multiple points from the database based on point IDs, document IDs, or content hashes.
-        """  # noqa: E501
+        Delete multiple points by various identifiers using OR conditions.
+        """
 
         if not any([point_ids, document_ids, content_md5s]):
             return None
