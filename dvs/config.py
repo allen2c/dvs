@@ -33,6 +33,10 @@ class Settings(pydantic_settings.BaseSettings):
     def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
         return duckdb.connect(self.DUCKDB_PATH)
 
+    @property
+    def duckdb_path(self) -> pathlib.Path:
+        return pathlib.Path(self.DUCKDB_PATH)
+
     @functools.cached_property
     def console(self) -> "rich.console.Console":
         import rich.console

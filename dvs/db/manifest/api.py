@@ -1,3 +1,4 @@
+import logging
 import typing
 
 import dvs
@@ -5,6 +6,8 @@ import dvs.utils.openapi as openapi_utils
 from dvs.types.manifest import Manifest as ManifestType
 from dvs.utils.display import DISPLAY_SQL_PARAMS, DISPLAY_SQL_QUERY
 from dvs.utils.timer import Timer
+
+logger = logging.getLogger(__name__)
 
 
 class Manifest:
@@ -22,9 +25,7 @@ class Manifest:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Created table: '{dvs.MANIFEST_TABLE_NAME}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Created table: '{dvs.MANIFEST_TABLE_NAME}' in {dur:.3f} ms")
 
         return True
 
@@ -39,7 +40,7 @@ class Manifest:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Retrieved manifest in {dur:.3f} ms")
+            logger.debug(f"Retrieved manifest in {dur:.3f} ms")
 
         return out
 
@@ -56,7 +57,7 @@ class Manifest:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Created manifest in {dur:.3f} ms")
+            logger.debug(f"Created manifest in {dur:.3f} ms")
 
         return out
 

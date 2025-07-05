@@ -1,4 +1,5 @@
 import json
+import logging
 import typing
 
 import jinja2
@@ -25,6 +26,8 @@ from dvs.utils.sql_stmts import (
     SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE,
 )
 from dvs.utils.timer import Timer
+
+logger = logging.getLogger(__name__)
 
 
 class Points:
@@ -65,9 +68,7 @@ class Points:
             self._touch(verbose=verbose)
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Created table: '{dvs.POINTS_TABLE_NAME}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Created table: '{dvs.POINTS_TABLE_NAME}' in {dur:.3f} ms")
         return True
 
     def retrieve(
@@ -115,9 +116,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Retrieved point: '{point_id}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Retrieved point: '{point_id}' in {dur:.3f} ms")
         return out
 
     def create(
@@ -162,9 +161,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Created point: '{point.point_id}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Created point: '{point.point_id}' in {dur:.3f} ms")
         return point
 
     def bulk_create(
@@ -227,9 +224,7 @@ class Points:
                 if timer.duration > 1.0
                 else (timer.duration * 1000, "ms")
             )
-            self.dvs.settings.console.print(
-                f"Created {len(points)} points in {dur:.3f} {unit}"
-            )
+            logger.debug(f"Created {len(points)} points in {dur:.3f} {unit}")
 
         return points
 
@@ -261,9 +256,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Deleted point: '{point_id}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Deleted point: '{point_id}' in {dur:.3f} ms")
 
         return None
 
@@ -328,7 +321,7 @@ class Points:
                 if timer.duration > 1.0
                 else (timer.duration * 1000, "ms")
             )
-            self.dvs.settings.console.print(f"Listed points in {dur:.3f} {unit}")
+            logger.debug(f"Listed points in {dur:.3f} {unit}")
         return out
 
     def gen(
@@ -425,7 +418,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Counted points in {dur:.3f} ms")
+            logger.debug(f"Counted points in {dur:.3f} ms")
         return count
 
     def drop(
@@ -472,7 +465,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Dropped points in {dur:.3f} ms")
+            logger.debug(f"Dropped points in {dur:.3f} ms")
 
         return None
 
@@ -520,7 +513,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
+            logger.debug(
                 f"Deleted outdated points of document: '{document_id}' in {dur:.3f} ms"
             )
         return None
@@ -567,7 +560,7 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Deleted points in {dur:.3f} ms")
+            logger.debug(f"Deleted points in {dur:.3f} ms")
 
         return None
 

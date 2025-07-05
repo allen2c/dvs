@@ -41,15 +41,15 @@ class DVS:
         )
 
     @property
-    def db_path(self) -> pathlib.Path:
-        return pathlib.Path(self.settings.DUCKDB_PATH)
+    def duckdb_path(self) -> pathlib.Path:
+        return self.settings.duckdb_path
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
         """
         Always open a new duckdb connection.
         """
-        return duckdb.connect(self.db_path)
+        return duckdb.connect(self.duckdb_path)
 
     def add(
         self,

@@ -1,4 +1,5 @@
 import json
+import logging
 import typing
 
 import jinja2
@@ -16,6 +17,8 @@ from dvs.utils.display import (
 from dvs.utils.dummies import dummy_httpx_response
 from dvs.utils.sql_stmts import SQL_STMT_DROP_TABLE
 from dvs.utils.timer import Timer
+
+logger = logging.getLogger(__name__)
 
 
 class Documents:
@@ -47,9 +50,7 @@ class Documents:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Created table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Created table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms")
 
         return True
 
@@ -82,9 +83,7 @@ class Documents:
             out = self._retrieve(document_id, verbose=verbose)
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Retrieved document: '{document_id}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Retrieved document: '{document_id}' in {dur:.3f} ms")
         return out
 
     def create(
@@ -115,9 +114,7 @@ class Documents:
         doc = docs[0]
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Created document: '{doc.document_id}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Created document: '{doc.document_id}' in {dur:.3f} ms")
         return doc
 
     def bulk_create(
@@ -164,9 +161,7 @@ class Documents:
                 if timer.duration > 1.0
                 else (timer.duration * 1000, "ms")
             )
-            self.dvs.settings.console.print(
-                f"Created {len(documents)} documents in {dur:.3f} {unit}"
-            )
+            logger.debug(f"Created {len(documents)} documents in {dur:.3f} {unit}")
 
         return documents
 
@@ -190,9 +185,7 @@ class Documents:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Deleted document: '{document_id}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Deleted document: '{document_id}' in {dur:.3f} ms")
         return None
 
     def list(
@@ -245,7 +238,7 @@ class Documents:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Listed documents in {dur:.3f} ms")
+            logger.debug(f"Listed documents in {dur:.3f} ms")
         return out
 
     def gen(
@@ -324,7 +317,7 @@ class Documents:
             )
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(f"Counted documents in {dur:.3f} ms")
+            logger.debug(f"Counted documents in {dur:.3f} ms")
         return out
 
     def drop(
@@ -373,9 +366,7 @@ class Documents:
 
         if verbose:
             dur = timer.duration * 1000
-            self.dvs.settings.console.print(
-                f"Dropped table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
-            )
+            logger.debug(f"Dropped table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms")
 
         return None
 
