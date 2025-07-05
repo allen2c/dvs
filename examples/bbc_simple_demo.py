@@ -46,13 +46,10 @@ def main():
         verbose=True,
     )
 
-    if not dvs_client.duckdb_path.exists():
-        console.print(f"Database file does not exist at {dvs_client.duckdb_path}")
-        console.print("Adding documents to the database")
-        dvs_client.db.documents.bulk_create(docs, verbose=True)
-    else:
-        console.print(f"Database file exists at {dvs_client.duckdb_path}")
-        console.print("Skipping document addition")
+    console.print(f"Database file does not exist at {dvs_client.duckdb_path}")
+    console.print(f"Adding {len(docs)} documents to the database")
+
+    dvs_client.add(docs, verbose=True)
 
     console.print(f"Added {dvs_client.db.documents.count()} documents to the database")
     console.print(f"Added {dvs_client.db.points.count()} points to the database")

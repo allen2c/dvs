@@ -65,8 +65,7 @@ class DVS:
             typing.Iterable[typing.Union[Document, str]],
         ],
         *,
-        embeddings_batch_size: int = 500,
-        create_embeddings_batch_size: int = 100,
+        create_points_batch_size: int = 100,
         verbose: bool | None = None,
     ) -> typing.Dict:
         """
@@ -124,7 +123,8 @@ class DVS:
 
         # Create embeddings (assign embeddings to points in place)
         for batch_points_with_contents in chunks(
-            zip(all_points, all_point_contents), batch_size=embeddings_batch_size
+            zip(all_points, all_point_contents),
+            batch_size=create_points_batch_size,
         ):
             Point.set_embeddings_from_contents(
                 [pt for pt, _ in batch_points_with_contents],
@@ -134,7 +134,7 @@ class DVS:
             )
             self.db.points.bulk_create(
                 [pt for pt, _ in batch_points_with_contents],
-                batch_size=create_embeddings_batch_size,
+                batch_size=create_points_batch_size,
                 verbose=verbose,
             )
 
