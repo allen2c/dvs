@@ -34,5 +34,5 @@ pytest:
 	python -m pytest --cov=languru --cov-config=.coveragerc --cov-report=xml:coverage.xml
 
 # Scripts
-build-example-datasets:
-	PYTHONPATH=. python scripts/build_example_datasets.py
+download-datasets:
+	PYTHONPATH=. python scripts/download_datasets.py $(DATASET) $(ARGS)
