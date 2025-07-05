@@ -1,27 +1,30 @@
+import pathlib
+import typing
 import zipfile
-from pathlib import Path
-from typing import Generator, List, Optional, Text
 
 import requests
-from rich.prompt import Confirm
+import rich.console
+import rich.prompt
 from tqdm import tqdm
 
-from dvs.config import console, settings
+from dvs.config import CACHE_DIR, TEMP_DIR
 from dvs.types.document import Document
 
 URL_BBC_NEWS_DATASET = "http://mlg.ucd.ie/files/datasets/bbc-fulltext.zip"
 
+console = rich.console.Console()
+
 
 def download_documents(
     *,
-    url: Text = URL_BBC_NEWS_DATASET,
-    download_dirpath: Text | Path = settings._temp_dir,
-    target_dirpath: Text | Path = settings.APP_DATA_DIR,
-    overwrite: Optional[bool] = None,
-) -> List[Document]:
-    download_dirpath = Path(download_dirpath).resolve()
+    url: typing.Text = URL_BBC_NEWS_DATASET,
+    download_dirpath: typing.Text | pathlib.Path = TEMP_DIR,
+    target_dirpath: typing.Text | pathlib.Path = CACHE_DIR,
+    overwrite: typing.Optional[bool] = None,
+) -> typing.List[Document]:
+    download_dirpath = pathlib.Path(download_dirpath).resolve()
     download_dirpath.mkdir(parents=True, exist_ok=True)
-    target_dirpath = Path(target_dirpath).resolve()
+    target_dirpath = pathlib.Path(target_dirpath).resolve()
     target_dirpath.mkdir(parents=True, exist_ok=True)
 
     zip_path = download_bbc_news_dataset(
@@ -40,14 +43,14 @@ def download_documents(
 
 
 def download_bbc_news_dataset(
-    url: Text = URL_BBC_NEWS_DATASET,
-    download_dirpath: Text | Path = settings._temp_dir,
-    overwrite: Optional[bool] = None,
-) -> Path:
-    download_filepath = Path(download_dirpath) / "bbc-fulltext.zip"
+    url: typing.Text = URL_BBC_NEWS_DATASET,
+    download_dirpath: typing.Text | pathlib.Path = TEMP_DIR,
+    overwrite: typing.Optional[bool] = None,
+) -> pathlib.Path:
+    download_filepath = pathlib.Path(download_dirpath) / "bbc-fulltext.zip"
     if download_filepath.exists():
         if overwrite is None:
-            overwrite = Confirm.ask(
+            overwrite = rich.prompt.Confirm.ask(
                 f"File already exists: {download_filepath}. Overwrite?"
             )
         if not overwrite:
@@ -76,22 +79,24 @@ def download_bbc_news_dataset(
 
 
 def unzip_bbc_news_dataset(
-    zip_path: Path, target_dirpath: Text | Path = settings.APP_DATA_DIR
-) -> Path:
-    target_dirpath = Path(target_dirpath).resolve()
+    zip_path: pathlib.Path, target_dirpath: typing.Text | pathlib.Path = CACHE_DIR
+) -> pathlib.Path:
+    target_dirpath = pathlib.Path(target_dirpath).resolve()
     target_dirpath.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(target_dirpath)
     return target_dirpath
 
 
-def walk_bbc_news_dataset(root_dir: Path) -> Generator[Path, None, None]:
+def walk_bbc_news_dataset(
+    root_dir: pathlib.Path,
+) -> typing.Generator[pathlib.Path, None, None]:
     for path in root_dir.glob("**/*"):
         if path.is_file():
             yield path
 
 
-def parse_bbc_news_document(filepath: Path) -> Document:
+def parse_bbc_news_document(filepath: pathlib.Path) -> Document:
     with open(filepath, "r", encoding="utf-8") as file:
         content = file.read().strip()
     return Document.model_validate(

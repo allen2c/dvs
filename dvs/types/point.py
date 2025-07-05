@@ -4,10 +4,8 @@ import typing
 import openai_embeddings_model as oai_emb_model
 import pydantic
 
-import dvs.utils.cache
 import dvs.utils.chunk
 import dvs.utils.ids
-import dvs.utils.qs
 
 if typing.TYPE_CHECKING:
     from dvs.types.document import Document

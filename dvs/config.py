@@ -1,4 +1,5 @@
 import functools
+import pathlib
 import typing
 
 import duckdb
@@ -12,6 +13,9 @@ if typing.TYPE_CHECKING:
 MANIFEST_TABLE_NAME = "manifest"
 POINTS_TABLE_NAME = "points"
 DOCUMENTS_TABLE_NAME = "documents"
+
+CACHE_DIR = pathlib.Path("./cache/dvs")
+TEMP_DIR = CACHE_DIR.joinpath("tmp")
 
 
 class Settings(pydantic_settings.BaseSettings):
