@@ -67,6 +67,22 @@ class Manifest:
 
         return out
 
+    def drop(self, *, verbose: bool | None = None) -> bool:
+        """
+        Drop the manifest table and all its data.
+        This operation is irreversible.
+        """
+        verbose = self.dvs.verbose if verbose is None else verbose
+
+        with Timer() as timer:
+            self._drop(verbose=verbose)
+
+        if verbose:
+            dur = timer.duration * 1000
+            logger.debug(f"Dropped table: '{dvs.MANIFEST_TABLE_NAME}' in {dur:.3f} ms")
+
+        return True
+
     def _touch(self, *, verbose: bool | None = None) -> bool:
         """
         Internal method to create the manifest table if it does not exist.
@@ -147,3 +163,17 @@ class Manifest:
         self.dvs.conn.executemany(query, parameters)
 
         return manifest
+
+    def _drop(self, *, verbose: bool | None = None) -> None:
+        """
+        Internal method to drop the manifest table.
+        """
+        query = f"DROP TABLE IF EXISTS {dvs.MANIFEST_TABLE_NAME}"
+
+        if verbose:
+            self.dvs.settings.console.print(
+                f"\nDropping table: '{dvs.MANIFEST_TABLE_NAME}' with SQL:\n"
+                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            )
+
+        self.dvs.conn.execute(query)

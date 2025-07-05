@@ -227,9 +227,11 @@ class Points:
         verbose: bool | None = None,
     ) -> int:
         """
-        Count points in the database with optional filtering.
+        Count the number of points in the database with optional filtering.
+        Returns the total count of points matching the criteria.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
+
         with Timer() as timer:
             count = self._count(
                 document_id=document_id,
@@ -239,8 +241,33 @@ class Points:
 
         if verbose:
             dur = timer.duration * 1000
-            logger.debug(f"Counted points in {dur:.3f} ms")
+            logger.debug(f"Counted {count} points in {dur:.3f} ms")
+
         return count
+
+    def content_exists(
+        self, content_md5: typing.Text, *, verbose: bool | None = None
+    ) -> bool:
+        """
+        Check if a point with the given content_md5 exists in the database.
+        """
+        verbose = self.dvs.verbose if verbose is None else verbose
+
+        with Timer() as timer:
+            out = self._list(
+                document_id=None,
+                content_md5=content_md5,
+                after=None,
+                before=None,
+                limit=1,
+                order="asc",
+                with_embedding=False,
+                verbose=verbose,
+            )
+        if verbose:
+            dur = timer.duration * 1000
+            logger.debug(f"Checked content_md5 in {dur:.3f} ms")
+        return len(out.data) > 0
 
     def drop(
         self,
@@ -631,13 +658,14 @@ class Points:
         *,
         document_id: typing.Text,
         content_md5: typing.Text,
-        verbose: bool | None,
+        verbose: bool | None = None,
     ) -> None:
         """
         Remove outdated points for a document based on content hash.
         """
         query_template = jinja2.Template(SQL_STMT_REMOVE_OUTDATED_POINTS)
         query = query_template.render(table_name=dvs.POINTS_TABLE_NAME)
+        query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
         parameters = [document_id, content_md5]
 
         if verbose:
