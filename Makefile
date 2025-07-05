@@ -31,7 +31,7 @@ mkdocs:
 	mkdocs serve
 
 pytest:
-	python -m pytest --cov=languru --cov-config=.coveragerc --cov-report=xml:coverage.xml
+	python -m pytest --cov=dvs --cov-config=.coveragerc --cov-report=xml:coverage.xml
 
 # Scripts
 download-datasets:
