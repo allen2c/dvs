@@ -12,6 +12,7 @@ version = "1.0.0"
 [tool.poetry.dependencies]
 diskcache = "*"
 duckdb = "^1"
+logging-bullet-train = "*"
 numpy = "^2"
 openai = "^1"
 openai-embeddings-model = "*"
