@@ -111,7 +111,7 @@ class Documents:
         """  # noqa: E501
         verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
-            docs = self._bulk_create([document], verbose=verbose)  # type: ignore
+            docs = self.bulk_create([document], verbose=verbose)
         doc = docs[0]
         if verbose:
             dur = timer.duration * 1000
@@ -152,7 +152,7 @@ class Documents:
                 (
                     DocumentType.model_validate(doc)
                     if isinstance(doc, typing.Dict)
-                    else doc
+                    else doc.sanitize()
                 )
                 for doc in documents
             ]

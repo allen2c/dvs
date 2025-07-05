@@ -1,7 +1,8 @@
 import argparse
-from dvs.utils.datasets import download_documents
-import typing
 import textwrap
+import typing
+
+from dvs.utils.datasets import download_documents
 
 
 def main(name: typing.Literal["bbc"], overwrite: bool = False):

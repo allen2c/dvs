@@ -36,9 +36,6 @@ class Document(pydantic.BaseModel):
     for advanced search and retrieval operations.
     """  # noqa: E501
 
-    # Pydantic config
-    model_config = pydantic.ConfigDict(validate_assignment=True)
-
     # Fields
     document_id: typing.Text = pydantic.Field(
         default_factory=lambda: dvs.utils.ids.get_id("doc"),
@@ -133,7 +130,7 @@ class Document(pydantic.BaseModel):
                     }
                 )
 
-            docs.append(doc)
+            docs.append(doc.sanitize())
 
         return docs
 
@@ -187,12 +184,10 @@ class Document(pydantic.BaseModel):
             print(f"Created {len(_pts_with_contents[0])} points")
         return _pts_with_contents
 
-    @pydantic.model_validator(mode="after")
-    def validate_string_fields(self) -> typing.Self:
+    def sanitize(self, refresh: bool = False) -> typing.Self:
         """
-        Validate the string fields of the document.
+        Sanitize the document.
         """
-
         # Validate content
         sanitized_content = str_or_none(self.content)
         if sanitized_content is None:
@@ -210,7 +205,14 @@ class Document(pydantic.BaseModel):
         else:
             self.name = sanitized_name
 
-        # Update updated_at
-        self.updated_at = int(time.time())
+        if refresh:
+            self.updated_at = int(time.time())
 
         return self
+
+    @pydantic.model_validator(mode="after")
+    def validate_string_fields(self) -> typing.Self:
+        """
+        Validate the string fields of the document.
+        """
+        return self.sanitize()
