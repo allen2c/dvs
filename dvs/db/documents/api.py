@@ -193,6 +193,7 @@ class Documents:
     def list(
         self,
         *,
+        content_md5: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
@@ -231,6 +232,7 @@ class Documents:
         """
         with Timer() as timer:
             out = self._list(
+                content_md5=content_md5,
                 after=after,
                 before=before,
                 limit=limit,
@@ -246,6 +248,7 @@ class Documents:
     def gen(
         self,
         *,
+        content_md5: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
@@ -279,7 +282,8 @@ class Documents:
         has_more = True
         current_after = after
         while has_more:
-            documents = self.list(
+            documents = self._list(
+                content_md5=content_md5,
                 after=current_after,
                 before=before,
                 limit=limit,
@@ -502,6 +506,7 @@ class Documents:
     def _list(
         self,
         *,
+        content_md5: typing.Optional[typing.Text],
         after: typing.Optional[typing.Text],
         before: typing.Optional[typing.Text],
         limit: int,
@@ -517,6 +522,10 @@ class Documents:
         query = f"SELECT {columns_expr} FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
+
+        if content_md5 is not None:
+            where_clauses.append("content_md5 = ?")
+            parameters.append(content_md5)
 
         if after is not None and order == "asc":
             where_clauses.append("document_id > ?")
