@@ -53,8 +53,8 @@ def model_settings() -> oai_emb_model.ModelSettings:
 
 
 @pytest.fixture(scope="module")
-def dvs_settings() -> dvs.Settings:
-    return dvs.Settings(DUCKDB_PATH=str(temp_dir()))
+def dvs_settings(temp_dir: pathlib.Path) -> dvs.Settings:
+    return dvs.Settings(DUCKDB_PATH=str(temp_dir))
 
 
 @pytest.fixture(scope="module")
