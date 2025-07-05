@@ -1,7 +1,9 @@
+# dvs/db/documents/api.py
 import json
 import logging
 import typing
 
+import duckdb
 import jinja2
 from openai import NotFoundError
 
@@ -392,7 +394,13 @@ class Documents:
                 + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
             )
 
-        self.dvs.conn.sql(create_table_sql)
+        try:
+            self.dvs.conn.sql(create_table_sql)
+        except duckdb.CatalogException as e:
+            if "already exists" in str(e).lower():
+                logger.debug(f"Table '{dvs.DOCUMENTS_TABLE_NAME}' already exists")
+            else:
+                raise e
 
         return True
 

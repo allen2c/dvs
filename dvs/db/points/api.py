@@ -1,7 +1,9 @@
+# dvs/db/points/api.py
 import json
 import logging
 import typing
 
+import duckdb
 import jinja2
 import openai
 from tqdm import tqdm
@@ -600,7 +602,14 @@ class Points:
                 f"\nCreating table: '{dvs.POINTS_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
             )
-        self.dvs.conn.sql(create_table_sql)
+
+        try:
+            self.dvs.conn.sql(create_table_sql)
+        except duckdb.CatalogException as e:
+            if "already exists" in str(e).lower():
+                logger.debug(f"Table '{dvs.POINTS_TABLE_NAME}' already exists")
+            else:
+                raise e
 
         return True
 
