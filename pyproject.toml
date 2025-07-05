@@ -38,6 +38,7 @@ neoteroi-mkdocs = "*"
 
 [tool.poetry.group.dev.dependencies]
 black = { extras = ["jupyter"], version = "*" }
+codepress = "*"
 faker = "*"
 isort = "*"
 matplotlib = "*"
