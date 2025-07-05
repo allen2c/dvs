@@ -326,6 +326,26 @@ class Documents:
             logger.debug(f"Counted documents in {dur:.3f} ms")
         return out
 
+    def content_exists(
+        self, content_md5: typing.Text, *, verbose: bool | None = None
+    ) -> bool:
+        """
+        Check if a document with the given content_md5 exists in the database.
+        """
+        with Timer() as timer:
+            out = self._list(
+                content_md5=content_md5,
+                limit=1,
+                order="asc",
+                verbose=verbose,
+                after=None,
+                before=None,
+            )
+        if verbose:
+            dur = timer.duration * 1000
+            logger.debug(f"Checked content_md5 in {dur:.3f} ms")
+        return len(out.data) > 0
+
     def drop(
         self,
         *,

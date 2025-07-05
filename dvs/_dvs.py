@@ -7,6 +7,7 @@ import duckdb
 import openai
 import openai_embeddings_model as oai_emb_model
 from str_or_none import str_or_none
+from tqdm import tqdm
 
 import dvs
 import dvs.utils.vss as VSS
@@ -66,7 +67,9 @@ class DVS:
         ],
         *,
         create_points_batch_size: int = 100,
+        ignore_same_content: bool = True,
         verbose: bool | None = None,
+        very_verbose: bool | None = None,
     ) -> typing.Dict:
         """
         Add one or more documents to the vector similarity search database.
@@ -102,28 +105,48 @@ class DVS:
         """  # noqa: E501
 
         verbose = self.verbose if verbose is None else verbose
-        output: list[tuple[Document, list[Point]]] = []
+        very_verbose = True if very_verbose else False
 
         # Validate documents
         docs: list["Document"] = Document.from_contents(documents)
-        all_points: list[Point] = []
-        all_point_contents: list[str] = []
+        ignored_docs_indexes: list[int] = []
+        creating_points: list[Point] = []
+        creating_point_contents: list[str] = []
 
-        # Collect documents and points
-        for doc in docs:
+        # Collect documents
+        for idx, doc in tqdm(
+            enumerate(docs),
+            total=len(docs),
+            disable=not verbose,
+            desc="Checking for duplicate documents",
+        ):
+            if ignore_same_content:
+                if self.db.documents.content_exists(doc.content_md5, verbose=False):
+                    if very_verbose:
+                        logger.debug(
+                            f"Document {repr(doc.name)[:12]} with content_md5 "
+                            + f"'{doc.content_md5}' already exists, skipping creation"
+                        )
+                    ignored_docs_indexes.append(idx)
+                    continue
+        creating_docs = [
+            doc for idx, doc in enumerate(docs) if idx not in ignored_docs_indexes
+        ]
+
+        # Collect points
+        for doc in creating_docs:
             points_with_contents: tuple[list[Point], list[str]] = (
                 doc.to_points_with_contents(with_embeddings=False)
             )
-            output.append((doc, points_with_contents[0]))
-            all_points.extend(points_with_contents[0])
-            all_point_contents.extend(points_with_contents[1])
+            creating_points.extend(points_with_contents[0])
+            creating_point_contents.extend(points_with_contents[1])
 
         # Create documents into the database
-        self.db.documents.bulk_create(docs, verbose=verbose)
+        self.db.documents.bulk_create(creating_docs, verbose=verbose)
 
         # Create embeddings (assign embeddings to points in place)
         for batch_points_with_contents in chunks(
-            zip(all_points, all_point_contents),
+            zip(creating_points, creating_point_contents),
             batch_size=create_points_batch_size,
         ):
             Point.set_embeddings_from_contents(
@@ -140,8 +163,9 @@ class DVS:
 
         return {
             "success": True,
-            "created_documents": len(docs),
-            "created_points": len(all_points),
+            "created_documents": len(creating_docs),
+            "ignored_documents": len(ignored_docs_indexes),
+            "created_points": len(creating_points),
             "error": None,
         }
 
