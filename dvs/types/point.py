@@ -1,3 +1,4 @@
+# dvs/types/point.py
 import logging
 import typing
 
@@ -59,6 +60,24 @@ class Point(pydantic.BaseModel):
         default_factory=dict,
         description="Additional metadata associated with the point.",
     )
+
+    @pydantic.field_validator("embedding", mode="before")
+    @classmethod
+    def embedding_as_base64_string(cls, v: typing.Any) -> typing.Text:
+        """
+        Convert the embedding to a base64 string.
+        """
+        from dvs.utils.to import vector_to_base64
+
+        if isinstance(v, typing.Sequence):
+            if all(isinstance(x, (int, float)) for x in v):
+                return vector_to_base64(list(v))
+
+        if isinstance(v, str):
+            return v
+
+        logger.warning(f"Unknown embedding type: {type(v)}, let pydantic handle it")
+        return v  # type: ignore
 
     @classmethod
     def set_embeddings_from_contents(

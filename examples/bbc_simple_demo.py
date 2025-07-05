@@ -1,5 +1,6 @@
 # examples/bbc_simple_demo.py
 
+import asyncio
 import logging
 import pathlib
 
@@ -27,7 +28,7 @@ lbt.set_logger(logger, level=logging.DEBUG)
 lbt.set_logger("dvs", level=logging.DEBUG)
 
 
-def main():
+async def main():
     """Download datasets with specified parameters."""
 
     docs = download_documents(DATASET_NAME, overwrite=OVERWRITE)
@@ -54,6 +55,20 @@ def main():
     console.print(f"Added {dvs_client.db.documents.count()} documents to the database")
     console.print(f"Added {dvs_client.db.points.count()} points to the database")
 
+    search_results = await dvs_client.search(
+        query="Does Sony make good TVs?", verbose=True
+    )
+    for idx, (_, doc, score) in enumerate(search_results):
+        _display_content = repr(doc.content)
+        _display_content = (
+            f"{_display_content[:48]}...{_display_content[0]}"
+            if len(_display_content) > 48
+            else _display_content
+        )
+        console.print(
+            f"{idx + 1} | {score:.2f} | {repr(doc.name)[:12]} | {_display_content}"
+        )
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
