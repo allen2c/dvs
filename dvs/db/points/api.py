@@ -469,7 +469,7 @@ class Points:
                 + (1 if len(points) % batch_size else 0),
                 desc="Creating points",
             )
-            if verbose
+            if verbose and len(points) > batch_size
             else chunks(points, batch_size=batch_size)
         )
         _shown_debug = False

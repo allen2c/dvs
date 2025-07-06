@@ -91,7 +91,9 @@ class DVS:
         # Chunk documents
         chunked_docs = [
             chunked_doc
-            for doc in docs
+            for doc in tqdm(
+                docs, total=len(docs), disable=not verbose, desc="Chunking documents"
+            )
             for chunked_doc in doc.to_chunked_documents(
                 lines_per_chunk=lines_per_chunk,
                 tokens_per_chunk=tokens_per_chunk,
