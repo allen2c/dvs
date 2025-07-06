@@ -63,13 +63,13 @@ class Document(pydantic.BaseModel):
         default="",
         description="Source ID of the document.",
     )
-    total_chunks: int = pydantic.Field(
-        default=0,
-        description="Total number of chunks in the document from source.",
-    )
     chunk_index: int = pydantic.Field(
         default=0,
         description="Chunk index of the document from source.",
+    )
+    is_chunk: bool = pydantic.Field(
+        default=False,
+        description="Whether this document is part of a parent document.",
     )
 
     # Metrics
@@ -213,6 +213,36 @@ class Document(pydantic.BaseModel):
         if verbose:
             print(f"Created {len(_pts_with_contents[0])} points")
         return _pts_with_contents
+
+    def to_chunked_documents(
+        self,
+        *,
+        lines_per_chunk: int = 20,
+        tokens_per_chunk: int = 500,
+        encoding: typing.Optional["tiktoken.Encoding"] = None,
+    ) -> typing.List["Document"]:
+        import chunkle
+
+        children_docs: list["Document"] = []
+
+        for chunk_idx, chunk in enumerate(
+            chunkle.chunk(
+                self.content,
+                lines_per_chunk=lines_per_chunk,
+                tokens_per_chunk=tokens_per_chunk,
+            )
+        ):
+            child_doc = self.model_copy(
+                update={"content": chunk, "chunk_index": chunk_idx}, deep=True
+            )
+            child_doc.sanitize(refresh=True, encoding=encoding)
+            children_docs.append(child_doc)
+
+        if len(children_docs) != 1:
+            for child_doc in children_docs:
+                child_doc.is_chunk = True
+
+        return children_docs
 
     def sanitize(
         self,

@@ -19,6 +19,7 @@ from dvs.utils.chunk import chunks
 
 if typing.TYPE_CHECKING:
     from dvs.db.api import DB
+    from dvs.tokens import Tokens
     from dvs.types.manifest import Manifest as ManifestType
 
 
@@ -68,6 +69,8 @@ class DVS:
         *,
         create_points_batch_size: int = 100,
         ignore_same_content: bool = True,
+        lines_per_chunk: int = 20,
+        tokens_per_chunk: int = 500,
         verbose: bool | None = None,
         very_verbose: bool | None = None,
     ) -> typing.Dict:
@@ -86,10 +89,21 @@ class DVS:
         creating_points: list[Point] = []
         creating_point_contents: list[str] = []
 
+        # Chunk documents
+        chunked_docs = [
+            chunked_doc
+            for doc in docs
+            for chunked_doc in doc.to_chunked_documents(
+                lines_per_chunk=lines_per_chunk,
+                tokens_per_chunk=tokens_per_chunk,
+                encoding=self.tokens.enc,
+            )
+        ]
+
         # Collect documents
         for idx, doc in tqdm(
-            enumerate(docs),
-            total=len(docs),
+            enumerate(chunked_docs),
+            total=len(chunked_docs),
             disable=not verbose,
             desc="Checking for duplicate documents",
         ):
@@ -103,7 +117,9 @@ class DVS:
                     ignored_docs_indexes.append(idx)
                     continue
         creating_docs = [
-            doc for idx, doc in enumerate(docs) if idx not in ignored_docs_indexes
+            doc
+            for idx, doc in enumerate(chunked_docs)
+            if idx not in ignored_docs_indexes
         ]
 
         # Collect points
@@ -212,6 +228,12 @@ class DVS:
         from dvs.db.api import DB
 
         return DB(self)
+
+    @functools.cached_property
+    def tokens(self) -> "Tokens":
+        from dvs.tokens import Tokens
+
+        return Tokens(self)
 
     def _ensure_dvs_settings(
         self, settings: typing.Union[pathlib.Path, str] | Settings
