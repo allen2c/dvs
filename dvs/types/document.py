@@ -9,6 +9,8 @@ from str_or_none import str_or_none
 import dvs.utils.ids
 
 if typing.TYPE_CHECKING:
+    import tiktoken
+
     from dvs.types.point import Point
 
 
@@ -36,6 +38,7 @@ class Document(pydantic.BaseModel):
     """  # noqa: E501
 
     # Fields
+    # Core Identity
     document_id: typing.Text = pydantic.Field(
         default_factory=lambda: dvs.utils.ids.get_id("doc"),
         description="Unique identifier for the document.",
@@ -44,6 +47,8 @@ class Document(pydantic.BaseModel):
         ...,
         description="Name or title of the document.",
     )
+
+    # Content
     content: typing.Text = pydantic.Field(
         ...,
         description="Full text content of the document.",
@@ -52,10 +57,34 @@ class Document(pydantic.BaseModel):
         ...,
         description="MD5 hash of the content for integrity checks.",
     )
+
+    # Source & Structure
+    source_id: typing.Text = pydantic.Field(
+        default="",
+        description="Source ID of the document.",
+    )
+    total_chunks: int = pydantic.Field(
+        default=0,
+        description="Total number of chunks in the document from source.",
+    )
+    chunk_index: int = pydantic.Field(
+        default=0,
+        description="Chunk index of the document from source.",
+    )
+
+    # Metrics
+    total_tokens: int = pydantic.Field(
+        default=0,
+        description="Total number of tokens in the document.",
+    )
+
+    # Metadata
     metadata: typing.Dict[typing.Text, typing.Any] = pydantic.Field(
         default_factory=dict,
         description="Additional metadata associated with the document.",
     )
+
+    # Timestamps
     created_at: int = pydantic.Field(
         default_factory=lambda: int(time.time()),
         description="Unix timestamp of document creation.",
@@ -185,7 +214,12 @@ class Document(pydantic.BaseModel):
             print(f"Created {len(_pts_with_contents[0])} points")
         return _pts_with_contents
 
-    def sanitize(self, refresh: bool = False) -> typing.Self:
+    def sanitize(
+        self,
+        refresh: bool = False,
+        *,
+        encoding: typing.Optional["tiktoken.Encoding"] = None,
+    ) -> typing.Self:
         """
         Sanitize the document.
         """
@@ -208,6 +242,9 @@ class Document(pydantic.BaseModel):
 
         if refresh:
             self.updated_at = int(time.time())
+
+        if encoding is not None:
+            self.total_tokens = len(encoding.encode(self.content))
 
         return self
 

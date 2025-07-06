@@ -268,7 +268,7 @@ class Documents:
             primary_key="document_id",
             unique_fields=[],
             # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
-            indexes=["content_md5"],
+            indexes=["content_md5", "source_id"],
         )
         if verbose:
             self.dvs.settings.console.print(
