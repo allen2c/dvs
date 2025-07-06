@@ -1,18 +1,20 @@
-from collections import OrderedDict
-from typing import List, Optional, Text, Union
+import collections
+import logging
+import typing
 
 import openai
-from diskcache import Cache
-from fastapi import HTTPException, status
-from pydantic import BaseModel, Field
+import openai_embeddings_model as oai_emb_model
+import pydantic
 
 import dvs.utils.is_ as IS
 import dvs.utils.to as TO
-from dvs.config import logger, settings
 from dvs.types.encoding_type import EncodingType
+from dvs.utils.dummies import dummy_httpx_response
+
+logger = logging.getLogger(__name__)
 
 
-class SearchRequest(BaseModel):
+class SearchRequest(pydantic.BaseModel):
     """
     Represents a single search request for vector similarity search.
 
@@ -53,19 +55,19 @@ class SearchRequest(BaseModel):
           allowing for optimization of request size and processing time.
     """  # noqa: E501
 
-    query: Union[Text, List[float]] = Field(
+    query: typing.Union[typing.Text, typing.List[float]] = pydantic.Field(
         ...,
         description="The search query as text or a pre-computed vector embedding.",
     )
-    top_k: int = Field(
+    top_k: int = pydantic.Field(
         default=5,
         description="The maximum number of results to return.",
     )
-    with_embedding: bool = Field(
+    with_embedding: bool = pydantic.Field(
         default=False,
         description="Whether to include the embedding in the result.",
     )
-    encoding: Optional[EncodingType] = Field(
+    encoding: typing.Optional[EncodingType] = pydantic.Field(
         default=None,
         description="The encoding type for the query.",
     )
@@ -73,11 +75,11 @@ class SearchRequest(BaseModel):
     @classmethod
     async def to_vectors(
         cls,
-        search_requests: "SearchRequest" | List["SearchRequest"],
+        search_requests: typing.Union["SearchRequest", typing.List["SearchRequest"]],
         *,
-        cache: Cache,
-        openai_client: "openai.OpenAI",
-    ) -> List[List[float]]:
+        model: oai_emb_model.OpenAIEmbeddingsModel,
+        model_settings: oai_emb_model.ModelSettings,
+    ) -> typing.List[typing.List[float]]:
         """
         Convert search requests to vector embeddings, handling various input types and encodings.
 
@@ -142,30 +144,36 @@ class SearchRequest(BaseModel):
             else search_requests
         )
 
-        output_vectors: List[Optional[List[float]]] = [None] * len(search_requests)
-        required_emb_items: OrderedDict[int, Text] = OrderedDict()
+        output_vectors: typing.List[typing.Optional[typing.List[float]]] = [None] * len(
+            search_requests
+        )
+        required_emb_items: collections.OrderedDict[int, typing.Text] = (
+            collections.OrderedDict()
+        )
 
         for idx, search_request in enumerate(search_requests):
             # Handle empty queries
             if not search_request.query:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid queries[{idx}].",
+                raise openai.BadRequestError(
+                    message=f"Invalid queries[{idx}].",
+                    response=dummy_httpx_response(400, b"Bad Request"),
+                    body=None,
                 )
 
             # Handle text queries
-            if isinstance(search_request.query, Text):
+            if isinstance(search_request.query, typing.Text):
                 # Query is hint for base64 encoding
                 if search_request.encoding == EncodingType.BASE64:
                     output_vectors[idx] = TO.base64_to_vector(search_request.query)
                 # Query is hint for vector, but query is not array, raise error
                 elif search_request.encoding == EncodingType.VECTOR:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
+                    raise openai.BadRequestError(
+                        message=(
                             f"Mismatch between queries[{idx}].encoding and "
                             + f"queries[{idx}].query."
                         ),
+                        response=dummy_httpx_response(400, b"Bad Request"),
+                        body=None,
                     )
                 # Query is hint for plaintext, need to convert to vector
                 elif search_request.encoding is EncodingType.PLAINTEXT:
@@ -197,20 +205,19 @@ class SearchRequest(BaseModel):
 
         # Ensure all required embeddings are text
         if len(required_emb_items) > 0:
-            embeddings = await TO.queries_to_vectors_with_cache(
+            embeddings_resp = model.get_embeddings(
                 list(required_emb_items.values()),
-                cache=cache,
-                openai_client=openai_client,
-                model=settings.EMBEDDING_MODEL,
-                dimensions=settings.EMBEDDING_DIMENSIONS,
+                model_settings=model_settings,
             )
-            for idx, embedding in zip(required_emb_items.keys(), embeddings):
+            for idx, embedding in zip(
+                required_emb_items.keys(), embeddings_resp.to_python()
+            ):
                 output_vectors[idx] = embedding
 
         # Ensure all vectors are not None
         for idx, v in enumerate(output_vectors):
             assert v is not None, f"output_vectors[{idx}] is None"
             assert (
-                len(v) == settings.EMBEDDING_DIMENSIONS
+                len(v) == model_settings.dimensions
             ), f"output_vectors[{idx}] has wrong dimensions"
         return output_vectors  # type: ignore

@@ -1,6 +1,8 @@
 # Custom
 .cache
+cache/
 data
+poetry.lock
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -29,6 +31,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+!/dvs/db/manifest
 
 # PyInstaller
 *.manifest

@@ -1,21 +1,25 @@
 [tool.poetry]
 authors = ["allen2c <f1470891079@gmail.com>"]
 description = "Deploy simple vector similarity search service by DuckDB."
+homepage = "https://github.com/allen2c/dvs"
 license = "MIT"
 name = "dvs-py"
 packages = [{ include = "dvs" }]
 readme = "README.md"
-version = "0.4.0"
+repository = "https://github.com/allen2c/dvs"
+version = "1.0.0"
 
 [tool.poetry.dependencies]
 diskcache = "*"
-duckdb = ">=0.10.2"
-fastapi = { version = "^0", extras = ["standard"] }
+duckdb = "^1"
+logging-bullet-train = "*"
 numpy = "^2"
 openai = "^1"
+openai-embeddings-model = "*"
 pydantic = "^2"
 pydantic-settings = "*"
-python = "^3.12"
+python = ">=3.11,<4"
+str-or-none = "*"
 uuid-utils = "*"
 
 [tool.poetry.extras]
@@ -34,15 +38,18 @@ neoteroi-mkdocs = "*"
 
 [tool.poetry.group.dev.dependencies]
 black = { extras = ["jupyter"], version = "*" }
+codepress = "*"
 faker = "*"
 isort = "*"
 matplotlib = "*"
 pandas = "*"
-poetry-plugin-export = "^1.6.0"
+poetry-plugin-export = "*"
 pytest = "^8"
 pytest-asyncio = "*"
-pytest-cov = "^4"
-pytest-xdist = "^3"
+pytest-cov = "*"
+pytest-env = "*"
+pytest-xdist = "*"
+rich = "*"
 scipy = "*"
 setuptools = ">=69"
 

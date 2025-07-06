@@ -20,33 +20,19 @@ format-all:
 		--exclude .conda
 
 install-all:
-	poetry install -E all --with dev
+	poetry install --all-extras --all-groups
 
 update-all:
 	poetry update
 	poetry export --without-hashes -f requirements.txt --output requirements.txt
-	poetry export --without-hashes -E all --with dev -f requirements.txt --output requirements-all.txt
+	poetry export --without-hashes --all-extras --all-groups -f requirements.txt --output requirements-all.txt
 
 mkdocs:
 	mkdocs serve
 
 pytest:
-	python -m pytest --cov=languru --cov-config=.coveragerc --cov-report=xml:coverage.xml
+	python -m pytest --cov=dvs --cov-config=.coveragerc --cov-report=xml:coverage.xml
 
 # Scripts
-download-db:
-	chmod +x ./download_db.sh
-	./download_db.sh
-
-build-example-datasets:
-	PYTHONPATH=. python scripts/build_example_datasets.py
-
-build-example-datasets-poetry:
-	poetry run python scripts/build_example_datasets.py
-
-# Server
-run-server:
-	fastapi run dvs/app.py
-
-run-server-dev:
-	fastapi dev dvs/app.py
+download-datasets:
+	PYTHONPATH=. python scripts/download_datasets.py $(DATASET) $(ARGS)

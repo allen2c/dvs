@@ -1,266 +1,185 @@
-import time
-from pathlib import Path
-from typing import Iterable, List, Optional, Text, Tuple, Union
+import functools
+import logging
+import pathlib
+import typing
 
-import diskcache
 import duckdb
-from openai import OpenAI
+import openai
+import openai_embeddings_model as oai_emb_model
+from str_or_none import str_or_none
+from tqdm import tqdm
 
+import dvs
 import dvs.utils.vss as VSS
-from dvs.config import settings
+from dvs.config import Settings
 from dvs.types.document import Document
 from dvs.types.point import Point
 from dvs.types.search_request import SearchRequest
+from dvs.utils.chunk import chunks
+
+if typing.TYPE_CHECKING:
+    from dvs.db.api import DB
+    from dvs.types.manifest import Manifest as ManifestType
+
+
+logger = logging.getLogger(__name__)
 
 
 class DVS:
     def __init__(
         self,
-        duckdb_path: Optional[Union[Path, Text]] = None,
+        settings: typing.Union[pathlib.Path, str] | Settings,
         *,
-        touch: bool = True,
-        raise_if_exists: bool = False,
-        debug: bool = False,
-        openai_client: Optional["OpenAI"] = None,
-        cache: Optional["diskcache.Cache"] = None,
+        model_settings: oai_emb_model.ModelSettings | None = None,
+        model: oai_emb_model.OpenAIEmbeddingsModel | str,
+        verbose: bool | None = None,
     ):
-        self._db_path = Path(duckdb_path or settings.DUCKDB_PATH)
-        self.debug = debug
-        self.openai_client = openai_client or settings.openai_client
-        self.cache = cache or settings.cache
+        self.settings = self._ensure_dvs_settings(settings)
+        self.verbose = verbose or False
+        self.model = self._ensure_model(model)
+        self.model_settings = model_settings or oai_emb_model.ModelSettings()
 
-        if touch:
-            self.touch(raise_if_exists=raise_if_exists, debug=debug)
+        self.db_manifest = self._ensure_manifest(
+            self.model, self.model_settings, verbose=self.verbose
+        )
+
+        self.db.touch(verbose=self.verbose)
 
     @property
-    def db_path(self) -> Path:
-        return self._db_path
+    def duckdb_path(self) -> pathlib.Path:
+        return self.settings.duckdb_path
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
-        return duckdb.connect(self._db_path)  # Always open a new duckdb connection
-
-    def touch(self, *, raise_if_exists: bool = False, debug: Optional[bool] = None):
         """
-        Initialize the DuckDB database tables required for vector similarity search.
-
-        This method creates the necessary database tables (documents and points) with proper
-        schemas and indexes. It installs required DuckDB extensions and sets up HNSW indexing
-        for efficient vector similarity searches.
-
-        Notes
-        -----
-        - Creates 'documents' table for storing document metadata and content
-        - Creates 'points' table for storing vector embeddings with HNSW indexing
-        - Installs required DuckDB extensions (e.g., JSON, httpfs)
-        - Sets up indexes for optimized query performance
-
-        Examples
-        --------
-        >>> dvs = DVS(duckdb_path="./data/vectors.duckdb")
-        >>> dvs.touch(raise_if_exists=True, debug=True)
-
-        Warnings
-        --------
-        If raise_if_exists=True and tables already exist, raises ConflictError
-        with status code 409.
-        """  # noqa: E501
-
-        debug = self.debug if debug is None else debug
-
-        Document.objects.touch(
-            conn=self.conn, raise_if_exists=raise_if_exists, debug=debug
-        )
-        Point.objects.touch(
-            conn=self.conn, raise_if_exists=raise_if_exists, debug=debug
-        )
+        Always open a new duckdb connection.
+        """
+        return duckdb.connect(self.duckdb_path)
 
     def add(
         self,
-        documents: Union[
+        documents: typing.Union[
             Document,
-            Iterable[Document],
-            Text,
-            Iterable[Text],
-            Iterable[Union[Document, Text]],
+            typing.Iterable[Document],
+            str,
+            typing.Iterable[str],
+            typing.Iterable[typing.Union[Document, str]],
         ],
         *,
-        debug: Optional[bool] = None,
-    ) -> List[Tuple[Document, List[Point]]]:
+        create_points_batch_size: int = 100,
+        ignore_same_content: bool = True,
+        verbose: bool | None = None,
+        very_verbose: bool | None = None,
+    ) -> typing.Dict:
         """
         Add one or more documents to the vector similarity search database.
-
-        This method processes input documents (either as raw text or Document objects),
-        generates vector embeddings using OpenAI's API, and stores both documents and
-        their vector points in DuckDB for similarity searching.
-
-        Notes
-        -----
-        - Input documents are automatically stripped of whitespace
-        - Empty documents will raise ValueError
-        - For text inputs, document name is derived from first line (truncated to 28 chars)
-        - Embeddings are cached to improve performance on repeated content
-        - Documents and points are created in bulk transactions for efficiency
-
-        Examples
-        --------
-        >>> dvs = DVS()
-        >>> # Add single document
-        >>> dvs.add("This is a sample document")
-        >>> # Add multiple documents
-        >>> docs = [
-        ...     "First document content",
-        ...     Document(name="doc2", content="Second document")
-        ... ]
-        >>> dvs.add(docs)
-
-        Warnings
-        --------
-        - Large batches of documents may take significant time due to embedding generation
-        - OpenAI API costs apply for generating embeddings
+        Processes documents, generates embeddings via OpenAI API, and stores in DuckDB.
+        Returns dict with creation stats and ignores duplicates if ignore_same_content=True.
         """  # noqa: E501
 
-        debug = self.debug if debug is None else debug
-        output: List[Tuple[Document, List[Point]]] = []
+        verbose = self.verbose if verbose is None else verbose
+        very_verbose = True if very_verbose else False
 
         # Validate documents
-        if isinstance(documents, Text) or isinstance(documents, Document):
-            documents = [documents]
-        docs: List["Document"] = []
-        for idx, doc in enumerate(documents):
-            if isinstance(doc, Text):
-                doc = doc.strip()
-                if not doc:
-                    raise ValueError(f"Document [{idx}] content cannot be empty: {doc}")
-                doc = Document.model_validate(
-                    {
-                        "name": doc.split("\n")[0][:28],
-                        "content": doc,
-                        "content_md5": Document.hash_content(doc),
-                        "metadata": {
-                            "content_length": len(doc),
-                        },
-                        "created_at": int(time.time()),
-                        "updated_at": int(time.time()),
-                    }
-                )
-                doc = doc.strip()
-                docs.append(doc)
-            else:
-                doc = doc.strip()
-                if not doc.content.strip():
-                    raise ValueError(
-                        f"Document [{idx}] content cannot be empty: {doc.content}"
-                    )
-                docs.append(doc)
+        docs: list["Document"] = Document.from_contents(documents)
+        ignored_docs_indexes: list[int] = []
+        creating_points: list[Point] = []
+        creating_point_contents: list[str] = []
 
-        # Collect documents and points
-        for doc in docs:
-            points: List[Point] = doc.to_points()
-            output.append((doc, points))
+        # Collect documents
+        for idx, doc in tqdm(
+            enumerate(docs),
+            total=len(docs),
+            disable=not verbose,
+            desc="Checking for duplicate documents",
+        ):
+            if ignore_same_content:
+                if self.db.documents.content_exists(doc.content_md5, verbose=False):
+                    if very_verbose:
+                        logger.debug(
+                            f"Document {repr(doc.name)[:12]} with content_md5 "
+                            + f"'{doc.content_md5}' already exists, skipping creation"
+                        )
+                    ignored_docs_indexes.append(idx)
+                    continue
+        creating_docs = [
+            doc for idx, doc in enumerate(docs) if idx not in ignored_docs_indexes
+        ]
 
-        # Create embeddings
-        all_points = [pt for _, pts in output for pt in pts]
-        all_points = Point.set_embeddings_from_contents(
-            all_points,
-            docs,
-            openai_client=self.openai_client,
-            cache=self.cache,
-            debug=debug,
-        )
+        # Collect points
+        for doc in creating_docs:
+            points_with_contents: tuple[list[Point], list[str]] = (
+                doc.to_points_with_contents(with_embeddings=False)
+            )
+            creating_points.extend(points_with_contents[0])
+            creating_point_contents.extend(points_with_contents[1])
 
-        # Bulk create documents and points
-        docs = Document.objects.bulk_create(docs, conn=self.conn, debug=debug)
-        all_points = Point.objects.bulk_create(all_points, conn=self.conn, debug=debug)
+        # Create documents into the database
+        self.db.documents.bulk_create(creating_docs, verbose=verbose)
 
-        return output
+        # Create embeddings (assign embeddings to points in place)
+        for batch_points_with_contents in chunks(
+            zip(creating_points, creating_point_contents),
+            batch_size=create_points_batch_size,
+        ):
+            Point.set_embeddings_from_contents(
+                [pt for pt, _ in batch_points_with_contents],
+                [c for _, c in batch_points_with_contents],
+                model=self.model,
+                model_settings=self.model_settings,
+            )
+            self.db.points.bulk_create(
+                [pt for pt, _ in batch_points_with_contents],
+                batch_size=create_points_batch_size,
+                verbose=verbose,
+            )
+
+        return {
+            "success": True,
+            "created_documents": len(creating_docs),
+            "ignored_documents": len(ignored_docs_indexes),
+            "created_points": len(creating_points),
+            "error": None,
+        }
 
     def remove(
         self,
-        doc_ids: Union[Text, Iterable[Text]],
+        doc_ids: typing.Union[str, typing.Iterable[str]],
         *,
-        debug: Optional[bool] = None,
+        verbose: bool | None = None,
     ) -> None:
         """
         Remove one or more documents and their associated vector points from the database.
-
-        This method deletes the specified documents and all their corresponding vector points
-        from the DuckDB database. It ensures that both the document data and associated
-        vector embeddings are properly cleaned up.
-
-        Notes
-        -----
-        - Accepts either a single document ID or an iterable of document IDs
-        - Removes both document metadata and associated vector points
-        - Operations are performed sequentially for each document ID
-
-        Examples
-        --------
-        >>> dvs = DVS()
-        >>> # Remove single document
-        >>> dvs.remove("doc-123abc")
-        >>> # Remove multiple documents
-        >>> dvs.remove(["doc-123abc", "doc-456def"])
-
-        Warnings
-        --------
-        - This operation is irreversible and will permanently delete the documents
-        - If a document ID doesn't exist, a NotFoundError will be raised
+        Accepts single document ID or iterable of IDs and deletes both documents and points.
+        Operation is irreversible and raises NotFoundError if document ID doesn't exist.
         """  # noqa: E501
+        verbose = self.verbose if verbose is None else verbose
+        doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
 
-        debug = self.debug if debug is None else debug
-        doc_ids = [doc_ids] if isinstance(doc_ids, Text) else list(doc_ids)
-
+        self.db.points.remove_many(document_ids=doc_ids, verbose=verbose)
         for doc_id in doc_ids:
-            Document.objects.remove(doc_id, conn=self.conn, debug=debug)
-            Point.objects.remove_many(
-                document_ids=[doc_id], conn=self.conn, debug=debug
-            )
+            self.db.documents.remove(doc_id, verbose=verbose)
 
         return None
 
     async def search(
         self,
-        query: Text,
+        query: str,
         top_k: int = 3,
         *,
         with_embedding: bool = False,
-        debug: Optional[bool] = None,
-    ) -> List[Tuple["Point", Optional["Document"], float]]:
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
         """
-        Perform an asynchronous vector similarity search using text query.
-
-        This method converts the input text query into a vector embedding using OpenAI's API,
-        then searches for similar documents in the DuckDB database using cosine similarity.
-        Results are returned as tuples containing the matched point, associated document,
-        and relevance score.
-
-        Notes
-        -----
-        - Query text is automatically stripped of whitespace
-        - Empty queries will raise ValueError
-        - Embeddings are cached to improve performance on repeated queries
-        - Results are ordered by descending relevance score (cosine similarity)
-
-        Examples
-        --------
-        >>> dvs = DVS()
-        >>> results = await dvs.search(
-        ...     query="What is machine learning?",
-        ...     top_k=3,
-        ...     with_embedding=False
-        ... )
-        >>> for point, document, score in results:
-        ...     print(f"Score: {score:.3f}, Doc: {document.name}")
-
-        Warnings
-        --------
-        - OpenAI API costs apply for generating query embeddings
-        - Large top_k values may impact performance
+        Perform asynchronous vector similarity search using text query.
+        Converts query to embedding via OpenAI API and searches DuckDB using cosine similarity.
+        Returns list of tuples containing matched point, document, and relevance score.
         """  # noqa: E501
 
-        query = query.strip()
-        if not query:
+        verbose = self.verbose if verbose is None else verbose
+
+        sanitized_query = str_or_none(query)
+        if sanitized_query is None:
             raise ValueError("Query cannot be empty")
 
         # Validate search request
@@ -269,8 +188,8 @@ class DVS:
         )
         vectors = await SearchRequest.to_vectors(
             [search_req],
-            cache=self.cache,
-            openai_client=self.openai_client,
+            model=self.model,
+            model_settings=self.model_settings,
         )
         vector = vectors[0]
 
@@ -278,8 +197,99 @@ class DVS:
         results = await VSS.vector_search(
             vector=vector,
             top_k=search_req.top_k,
+            embedding_dimensions=self.db_manifest.embedding_dimensions,
+            documents_table_name=dvs.DOCUMENTS_TABLE_NAME,
+            points_table_name=dvs.POINTS_TABLE_NAME,
             conn=self.conn,
             with_embedding=search_req.with_embedding,
+            console=self.settings.console,
         )
 
         return results
+
+    @functools.cached_property
+    def db(self) -> "DB":
+        from dvs.db.api import DB
+
+        return DB(self)
+
+    def _ensure_dvs_settings(
+        self, settings: typing.Union[pathlib.Path, str] | Settings
+    ) -> Settings:
+        if isinstance(settings, Settings):
+            pass
+        else:
+            settings = Settings(DUCKDB_PATH=str(settings))
+
+        if settings.DUCKDB_PATH is None:
+            raise ValueError("DUCKDB_PATH is not set")
+
+        return settings
+
+    def _ensure_model(
+        self, model: oai_emb_model.OpenAIEmbeddingsModel | str
+    ) -> oai_emb_model.OpenAIEmbeddingsModel:
+        if isinstance(model, oai_emb_model.OpenAIEmbeddingsModel):
+            return model
+        else:
+            return oai_emb_model.OpenAIEmbeddingsModel(
+                model, openai.OpenAI(), oai_emb_model.get_default_cache()
+            )
+
+    def _ensure_manifest(
+        self,
+        model: oai_emb_model.OpenAIEmbeddingsModel,
+        model_settings: oai_emb_model.ModelSettings,
+        verbose: bool,
+    ) -> "ManifestType":
+        """
+        Ensure database manifest is consistent with model and model settings.
+        Creates manifest if missing or validates existing one against current model.
+        Sets dimensions in model_settings if None and returns the manifest.
+        """  # noqa: E501
+        from dvs.types.manifest import Manifest as ManifestType
+
+        # Ensure the manifest table exists
+        if dvs.MANIFEST_TABLE_NAME not in self.db.show_table_names():
+            logger.debug("Manifest table does not exist, creating it")
+            self.db.manifest.touch(verbose=verbose)
+
+        might_manifest = self.db.manifest.receive(verbose=verbose)
+
+        # If the manifest table exists but is empty, create a new manifest
+        if might_manifest is None:
+            logger.debug("Manifest table is empty, creating a new manifest")
+            if model_settings.dimensions is None:
+                raise ValueError(
+                    "Could not infer the embedding dimensions, "
+                    + "please provide the model settings."
+                )
+
+            self.db_manifest = self.db.manifest.create(
+                ManifestType(
+                    embedding_model=self.model.model,
+                    embedding_dimensions=model_settings.dimensions,
+                ),
+                verbose=verbose,
+            )
+
+        # If the manifest table exists and is not empty, use the existing manifest
+        else:
+            logger.debug("Manifest table exists, using the existing manifest")
+            self.db_manifest = might_manifest
+
+            if self.db_manifest.embedding_model != model.model:
+                raise ValueError(
+                    "The indicated embedding model is not the same as "
+                    + "the one in the manifest of the database"
+                )
+            if model_settings.dimensions is not None:
+                if self.db_manifest.embedding_dimensions != model_settings.dimensions:
+                    raise ValueError(
+                        "The indicated embedding dimensions are not the same as "
+                        + "the one in the manifest of the database"
+                    )
+            else:
+                model_settings.dimensions = self.db_manifest.embedding_dimensions
+
+        return self.db_manifest
