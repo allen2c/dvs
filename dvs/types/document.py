@@ -9,6 +9,8 @@ from str_or_none import str_or_none
 import dvs.utils.ids
 
 if typing.TYPE_CHECKING:
+    import tiktoken
+
     from dvs.types.point import Point
 
 
@@ -36,6 +38,7 @@ class Document(pydantic.BaseModel):
     """  # noqa: E501
 
     # Fields
+    # Core Identity
     document_id: typing.Text = pydantic.Field(
         default_factory=lambda: dvs.utils.ids.get_id("doc"),
         description="Unique identifier for the document.",
@@ -44,6 +47,8 @@ class Document(pydantic.BaseModel):
         ...,
         description="Name or title of the document.",
     )
+
+    # Content
     content: typing.Text = pydantic.Field(
         ...,
         description="Full text content of the document.",
@@ -52,10 +57,34 @@ class Document(pydantic.BaseModel):
         ...,
         description="MD5 hash of the content for integrity checks.",
     )
+
+    # Source & Structure
+    source_id: typing.Text = pydantic.Field(
+        default="",
+        description="Source ID of the document.",
+    )
+    chunk_index: int = pydantic.Field(
+        default=0,
+        description="Chunk index of the document from source.",
+    )
+    is_chunk: bool = pydantic.Field(
+        default=False,
+        description="Whether this document is part of a parent document.",
+    )
+
+    # Metrics
+    total_tokens: int = pydantic.Field(
+        default=0,
+        description="Total number of tokens in the document.",
+    )
+
+    # Metadata
     metadata: typing.Dict[typing.Text, typing.Any] = pydantic.Field(
         default_factory=dict,
         description="Additional metadata associated with the document.",
     )
+
+    # Timestamps
     created_at: int = pydantic.Field(
         default_factory=lambda: int(time.time()),
         description="Unix timestamp of document creation.",
@@ -135,7 +164,7 @@ class Document(pydantic.BaseModel):
 
         return docs
 
-    def to_points_with_contents(
+    def to_point_with_content(
         self,
         *,
         model: oai_emb_model.OpenAIEmbeddingsModel | None = None,
@@ -143,9 +172,9 @@ class Document(pydantic.BaseModel):
         with_embeddings: bool | None = None,
         metadata: typing.Optional[typing.Dict[typing.Text, typing.Any]] = None,
         verbose: bool | None = None,
-    ) -> typing.Tuple[typing.List["Point"], typing.List[typing.Text]]:
+    ) -> typing.Tuple["Point", typing.Text]:
         """
-        Create points from the document.
+        Create the point from the document.
         """
 
         from dvs.types.point import Point
@@ -176,16 +205,49 @@ class Document(pydantic.BaseModel):
             )
             _pt.embedding = emb_resp.output[0]
 
-        _pts_with_contents = ([_pt], [_content])
+        return (_pt, _content)
 
-        if len(_pts_with_contents[0]) != len(_pts_with_contents[1]):
-            raise ValueError("Number of points and contents of points must be the same")
+    def to_chunked_documents(
+        self,
+        *,
+        lines_per_chunk: int = 20,
+        tokens_per_chunk: int = 500,
+        encoding: typing.Optional["tiktoken.Encoding"] = None,
+    ) -> typing.List["Document"]:
+        import chunkle
 
-        if verbose:
-            print(f"Created {len(_pts_with_contents[0])} points")
-        return _pts_with_contents
+        children_docs: list["Document"] = []
 
-    def sanitize(self, refresh: bool = False) -> typing.Self:
+        for chunk_idx, chunk in enumerate(
+            chunkle.chunk(
+                self.content,
+                lines_per_chunk=lines_per_chunk,
+                tokens_per_chunk=tokens_per_chunk,
+            )
+        ):
+            child_doc = self.model_copy(
+                update={
+                    "document_id": dvs.utils.ids.get_id("doc"),
+                    "content": chunk,
+                    "chunk_index": chunk_idx,
+                },
+                deep=True,
+            )
+            child_doc.sanitize(refresh=True, encoding=encoding)
+            children_docs.append(child_doc)
+
+        if len(children_docs) != 1:
+            for child_doc in children_docs:
+                child_doc.is_chunk = True
+
+        return children_docs
+
+    def sanitize(
+        self,
+        refresh: bool = False,
+        *,
+        encoding: typing.Optional["tiktoken.Encoding"] = None,
+    ) -> typing.Self:
         """
         Sanitize the document.
         """
@@ -208,6 +270,9 @@ class Document(pydantic.BaseModel):
 
         if refresh:
             self.updated_at = int(time.time())
+
+        if encoding is not None:
+            self.total_tokens = len(encoding.encode(self.content))
 
         return self
 

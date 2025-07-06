@@ -19,6 +19,7 @@ from dvs.utils.chunk import chunks
 
 if typing.TYPE_CHECKING:
     from dvs.db.api import DB
+    from dvs.tokens import Tokens
     from dvs.types.manifest import Manifest as ManifestType
 
 
@@ -66,8 +67,10 @@ class DVS:
             typing.Iterable[typing.Union[Document, str]],
         ],
         *,
-        create_points_batch_size: int = 100,
+        batch_size: int = 100,
         ignore_same_content: bool = True,
+        lines_per_chunk: int = 20,
+        tokens_per_chunk: int = 500,
         verbose: bool | None = None,
         very_verbose: bool | None = None,
     ) -> typing.Dict:
@@ -83,13 +86,26 @@ class DVS:
         # Validate documents
         docs: list["Document"] = Document.from_contents(documents)
         ignored_docs_indexes: list[int] = []
-        creating_points: list[Point] = []
-        creating_point_contents: list[str] = []
+        creating_points_count: int = 0
+
+        # Chunk documents
+        chunked_docs = [
+            chunked_doc
+            for doc in tqdm(
+                docs, total=len(docs), disable=not verbose, desc="Chunking documents"
+            )
+            for chunked_doc in doc.to_chunked_documents(
+                lines_per_chunk=lines_per_chunk,
+                tokens_per_chunk=tokens_per_chunk,
+                encoding=self.tokens.enc,
+            )
+        ]
+        logger.debug(f"Chunked into {len(chunked_docs)} documents")
 
         # Collect documents
         for idx, doc in tqdm(
-            enumerate(docs),
-            total=len(docs),
+            enumerate(chunked_docs),
+            total=len(chunked_docs),
             disable=not verbose,
             desc="Checking for duplicate documents",
         ):
@@ -103,34 +119,29 @@ class DVS:
                     ignored_docs_indexes.append(idx)
                     continue
         creating_docs = [
-            doc for idx, doc in enumerate(docs) if idx not in ignored_docs_indexes
+            doc
+            for idx, doc in enumerate(chunked_docs)
+            if idx not in ignored_docs_indexes
         ]
-
-        # Collect points
-        for doc in creating_docs:
-            points_with_contents: tuple[list[Point], list[str]] = (
-                doc.to_points_with_contents(with_embeddings=False)
-            )
-            creating_points.extend(points_with_contents[0])
-            creating_point_contents.extend(points_with_contents[1])
 
         # Create documents into the database
         self.db.documents.bulk_create(creating_docs, verbose=verbose)
 
         # Create embeddings (assign embeddings to points in place)
-        for batch_points_with_contents in chunks(
-            zip(creating_points, creating_point_contents),
-            batch_size=create_points_batch_size,
-        ):
-            Point.set_embeddings_from_contents(
-                [pt for pt, _ in batch_points_with_contents],
-                [c for _, c in batch_points_with_contents],
-                model=self.model,
+        for batch_docs in chunks(creating_docs, batch_size=batch_size):
+            _pts_with_contents = [
+                doc.to_point_with_content(with_embeddings=False) for doc in batch_docs
+            ]
+            _embeddings_resp = self.model.get_embeddings(
+                input=[c for _, c in _pts_with_contents],
                 model_settings=self.model_settings,
             )
+            for (pt, _), embedding in zip(_pts_with_contents, _embeddings_resp.output):
+                pt.embedding = embedding
+                creating_points_count += 1
+
             self.db.points.bulk_create(
-                [pt for pt, _ in batch_points_with_contents],
-                batch_size=create_points_batch_size,
+                [pt for pt, _ in _pts_with_contents],
                 verbose=verbose,
             )
 
@@ -138,7 +149,7 @@ class DVS:
             "success": True,
             "created_documents": len(creating_docs),
             "ignored_documents": len(ignored_docs_indexes),
-            "created_points": len(creating_points),
+            "created_points": creating_points_count,
             "error": None,
         }
 
@@ -213,6 +224,12 @@ class DVS:
 
         return DB(self)
 
+    @functools.cached_property
+    def tokens(self) -> "Tokens":
+        from dvs.tokens import Tokens
+
+        return Tokens(self)
+
     def _ensure_dvs_settings(
         self, settings: typing.Union[pathlib.Path, str] | Settings
     ) -> Settings:
@@ -233,7 +250,7 @@ class DVS:
             return model
         else:
             return oai_emb_model.OpenAIEmbeddingsModel(
-                model, openai.OpenAI(), oai_emb_model.get_default_cache()
+                model, openai.OpenAI(), cache=oai_emb_model.get_default_cache()
             )
 
     def _ensure_manifest(
