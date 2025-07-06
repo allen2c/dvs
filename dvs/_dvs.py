@@ -98,6 +98,7 @@ class DVS:
                 encoding=self.tokens.enc,
             )
         ]
+        logger.debug(f"Chunked into {len(chunked_docs)} documents")
 
         # Collect documents
         for idx, doc in tqdm(

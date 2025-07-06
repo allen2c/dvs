@@ -226,7 +226,12 @@ class Document(pydantic.BaseModel):
             )
         ):
             child_doc = self.model_copy(
-                update={"content": chunk, "chunk_index": chunk_idx}, deep=True
+                update={
+                    "document_id": dvs.utils.ids.get_id("doc"),
+                    "content": chunk,
+                    "chunk_index": chunk_idx,
+                },
+                deep=True,
             )
             child_doc.sanitize(refresh=True, encoding=encoding)
             children_docs.append(child_doc)
