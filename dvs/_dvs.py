@@ -233,7 +233,7 @@ class DVS:
             return model
         else:
             return oai_emb_model.OpenAIEmbeddingsModel(
-                model, openai.OpenAI(), oai_emb_model.get_default_cache()
+                model, openai.OpenAI(), cache=oai_emb_model.get_default_cache()
             )
 
     def _ensure_manifest(

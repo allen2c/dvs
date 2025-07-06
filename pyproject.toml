@@ -7,19 +7,21 @@ name = "dvs-py"
 packages = [{ include = "dvs" }]
 readme = "README.md"
 repository = "https://github.com/allen2c/dvs"
-version = "1.0.0"
+version = "1.1.0"
 
 [tool.poetry.dependencies]
+chunkle = "*"
 diskcache = "*"
 duckdb = "^1"
 logging-bullet-train = "*"
 numpy = "^2"
 openai = "^1"
-openai-embeddings-model = "*"
+openai-embeddings-model = ">=0.3.0,<1"
 pydantic = "^2"
 pydantic-settings = "*"
 python = ">=3.11,<4"
 str-or-none = "*"
+tiktoken = "*"
 uuid-utils = "*"
 
 [tool.poetry.extras]
