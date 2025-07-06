@@ -164,7 +164,7 @@ class Document(pydantic.BaseModel):
 
         return docs
 
-    def to_points_with_contents(
+    def to_point_with_content(
         self,
         *,
         model: oai_emb_model.OpenAIEmbeddingsModel | None = None,
@@ -172,9 +172,9 @@ class Document(pydantic.BaseModel):
         with_embeddings: bool | None = None,
         metadata: typing.Optional[typing.Dict[typing.Text, typing.Any]] = None,
         verbose: bool | None = None,
-    ) -> typing.Tuple[typing.List["Point"], typing.List[typing.Text]]:
+    ) -> typing.Tuple["Point", typing.Text]:
         """
-        Create points from the document.
+        Create the point from the document.
         """
 
         from dvs.types.point import Point
@@ -205,14 +205,7 @@ class Document(pydantic.BaseModel):
             )
             _pt.embedding = emb_resp.output[0]
 
-        _pts_with_contents = ([_pt], [_content])
-
-        if len(_pts_with_contents[0]) != len(_pts_with_contents[1]):
-            raise ValueError("Number of points and contents of points must be the same")
-
-        if verbose:
-            print(f"Created {len(_pts_with_contents[0])} points")
-        return _pts_with_contents
+        return (_pt, _content)
 
     def to_chunked_documents(
         self,
