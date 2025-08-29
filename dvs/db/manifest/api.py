@@ -29,7 +29,9 @@ class Manifest:
 
         if verbose:
             dur = timer.duration * 1000
-            logger.debug(f"Created table: '{dvs.MANIFEST_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Created table: '{dvs.DVS_MANIFEST_TABLE_NAME}' in {dur:.3f} ms"
+            )
 
         return True
 
@@ -79,7 +81,9 @@ class Manifest:
 
         if verbose:
             dur = timer.duration * 1000
-            logger.debug(f"Dropped table: '{dvs.MANIFEST_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Dropped table: '{dvs.DVS_MANIFEST_TABLE_NAME}' in {dur:.3f} ms"
+            )
 
         return True
 
@@ -89,12 +93,12 @@ class Manifest:
         Handles table creation SQL generation and execution.
         """
         create_table_sql = openapi_utils.openapi_to_create_table_sql(
-            ManifestType.model_json_schema(), table_name=dvs.MANIFEST_TABLE_NAME
+            ManifestType.model_json_schema(), table_name=dvs.DVS_MANIFEST_TABLE_NAME
         ).strip()
 
         if verbose:
             self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.MANIFEST_TABLE_NAME}' with SQL:\n"
+                f"\nCreating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
             )
 
@@ -102,7 +106,7 @@ class Manifest:
             self.dvs.conn.sql(create_table_sql)
         except duckdb.CatalogException as e:
             if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.MANIFEST_TABLE_NAME}' already exists")
+                logger.debug(f"Table '{dvs.DVS_MANIFEST_TABLE_NAME}' already exists")
             else:
                 raise e
 
@@ -116,7 +120,7 @@ class Manifest:
         columns = list(ManifestType.model_json_schema()["properties"].keys())
         columns_expr = ",".join(columns)
 
-        query = f"SELECT {columns_expr} FROM {dvs.MANIFEST_TABLE_NAME}"
+        query = f"SELECT {columns_expr} FROM {dvs.DVS_MANIFEST_TABLE_NAME}"
 
         if verbose:
             self.dvs.settings.console.print(
@@ -149,7 +153,7 @@ class Manifest:
         ]
 
         query = (
-            f"INSERT INTO {dvs.MANIFEST_TABLE_NAME} ({columns_expr}) "
+            f"INSERT INTO {dvs.DVS_MANIFEST_TABLE_NAME} ({columns_expr}) "
             + f"VALUES ({placeholders})"
         )
 
@@ -168,11 +172,11 @@ class Manifest:
         """
         Internal method to drop the manifest table.
         """
-        query = f"DROP TABLE IF EXISTS {dvs.MANIFEST_TABLE_NAME}"
+        query = f"DROP TABLE IF EXISTS {dvs.DVS_MANIFEST_TABLE_NAME}"
 
         if verbose:
             self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.MANIFEST_TABLE_NAME}' with SQL:\n"
+                f"\nDropping table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
             )
 

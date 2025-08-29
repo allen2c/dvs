@@ -45,7 +45,9 @@ class Points:
             self._touch(verbose=verbose)
         if verbose:
             dur = timer.duration * 1000
-            logger.debug(f"Created table: '{dvs.POINTS_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Created table: '{dvs.DVS_POINTS_TABLE_NAME}' in {dur:.3f} ms"
+            )
         return True
 
     def retrieve(
@@ -358,7 +360,7 @@ class Points:
         # Create table
         create_table_sql = openapi_utils.openapi_to_create_table_sql(
             PointType.model_json_schema(),
-            table_name=dvs.POINTS_TABLE_NAME,
+            table_name=dvs.DVS_POINTS_TABLE_NAME,
             primary_key="point_id",
             indexes=["document_id", "content_md5"],
             custom_sql_types={
@@ -373,7 +375,7 @@ class Points:
             # Required for HNSW index
             #
             + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
-                table_name=dvs.POINTS_TABLE_NAME,
+                table_name=dvs.DVS_POINTS_TABLE_NAME,
                 column_name="embedding",
                 metric="cosine",
             )
@@ -381,7 +383,7 @@ class Points:
 
         if verbose:
             self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.POINTS_TABLE_NAME}' with SQL:\n"
+                f"\nCreating table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
             )
 
@@ -389,7 +391,7 @@ class Points:
             self.dvs.conn.sql(create_table_sql)
         except duckdb.CatalogException as e:
             if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.POINTS_TABLE_NAME}' already exists")
+                logger.debug(f"Table '{dvs.DVS_POINTS_TABLE_NAME}' already exists")
             else:
                 raise e
 
@@ -411,7 +413,7 @@ class Points:
             columns = [c for c in columns if c != "embedding"]
         columns_expr = ",".join(columns)
 
-        query = f"SELECT {columns_expr} FROM {dvs.POINTS_TABLE_NAME} WHERE point_id = ?"  # noqa: E501
+        query = f"SELECT {columns_expr} FROM {dvs.DVS_POINTS_TABLE_NAME} WHERE point_id = ?"  # noqa: E501
         parameters = [point_id]
         if verbose:
             self.dvs.settings.console.print(
@@ -486,7 +488,7 @@ class Points:
                 )
 
             query = (
-                f"INSERT INTO {dvs.POINTS_TABLE_NAME} ({columns_expr}) "
+                f"INSERT INTO {dvs.DVS_POINTS_TABLE_NAME} ({columns_expr}) "
                 + f"VALUES ({placeholders})"
             )
             query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
@@ -511,7 +513,7 @@ class Points:
 
         query = (
             SQL_STMT_INSTALL_EXTENSIONS
-            + f"\nDELETE FROM {dvs.POINTS_TABLE_NAME} WHERE point_id = ?"
+            + f"\nDELETE FROM {dvs.DVS_POINTS_TABLE_NAME} WHERE point_id = ?"
         )
         parameters = [point_id]
         if verbose:
@@ -545,7 +547,7 @@ class Points:
             columns = [c for c in columns if c != "embedding"]
         columns_expr = ",".join(columns)
 
-        query = f"SELECT {columns_expr} FROM {dvs.POINTS_TABLE_NAME}\n"
+        query = f"SELECT {columns_expr} FROM {dvs.DVS_POINTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
@@ -610,7 +612,7 @@ class Points:
         """
         Count points in the database with optional filtering.
         """
-        query = f"SELECT COUNT(*) FROM {dvs.POINTS_TABLE_NAME}\n"
+        query = f"SELECT COUNT(*) FROM {dvs.DVS_POINTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
@@ -641,10 +643,10 @@ class Points:
         Drop the points table from the database.
         """
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
-        query = query_template.render(table_name=dvs.POINTS_TABLE_NAME)
+        query = query_template.render(table_name=dvs.DVS_POINTS_TABLE_NAME)
         if verbose:
             self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.POINTS_TABLE_NAME}' with SQL:\n"
+                f"\nDropping table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
             )
 
@@ -664,7 +666,7 @@ class Points:
         Remove outdated points for a document based on content hash.
         """
         query_template = jinja2.Template(SQL_STMT_REMOVE_OUTDATED_POINTS)
-        query = query_template.render(table_name=dvs.POINTS_TABLE_NAME)
+        query = query_template.render(table_name=dvs.DVS_POINTS_TABLE_NAME)
         query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
         parameters = [document_id, content_md5]
 
@@ -695,7 +697,9 @@ class Points:
         if not any([point_ids, document_ids, content_md5s]):
             return None
 
-        query = SQL_STMT_INSTALL_EXTENSIONS + f"\nDELETE FROM {dvs.POINTS_TABLE_NAME}\n"
+        query = (
+            SQL_STMT_INSTALL_EXTENSIONS + f"\nDELETE FROM {dvs.DVS_POINTS_TABLE_NAME}\n"
+        )
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 

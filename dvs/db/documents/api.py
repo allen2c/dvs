@@ -37,7 +37,9 @@ class Documents:
 
         if verbose:
             dur = timer.duration * 1000
-            logger.debug(f"Created table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Created table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
+            )
 
         return True
 
@@ -255,7 +257,9 @@ class Documents:
 
         if verbose:
             dur = timer.duration * 1000
-            logger.debug(f"Dropped table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Dropped table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
+            )
 
         return None
 
@@ -269,7 +273,7 @@ class Documents:
         # Create table
         create_table_sql = openapi_utils.openapi_to_create_table_sql(
             DocumentType.model_json_schema(),
-            table_name=dvs.DOCUMENTS_TABLE_NAME,
+            table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
             primary_key="document_id",
             unique_fields=[],
             # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
@@ -277,7 +281,7 @@ class Documents:
         )
         if verbose:
             self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.DOCUMENTS_TABLE_NAME}' with SQL:\n"
+                f"\nCreating table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
             )
 
@@ -285,7 +289,7 @@ class Documents:
             self.dvs.conn.sql(create_table_sql)
         except duckdb.CatalogException as e:
             if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.DOCUMENTS_TABLE_NAME}' already exists")
+                logger.debug(f"Table '{dvs.DVS_DOCUMENTS_TABLE_NAME}' already exists")
             else:
                 raise e
 
@@ -304,7 +308,7 @@ class Documents:
         columns_expr = ",".join(columns)
 
         query = (
-            f"SELECT {columns_expr} FROM {dvs.DOCUMENTS_TABLE_NAME} "
+            f"SELECT {columns_expr} FROM {dvs.DVS_DOCUMENTS_TABLE_NAME} "
             + "WHERE document_id = ?"
         )
         parameters = [document_id]
@@ -351,7 +355,7 @@ class Documents:
         ]
 
         query = (
-            f"INSERT INTO {dvs.DOCUMENTS_TABLE_NAME} ({columns_expr}) "
+            f"INSERT INTO {dvs.DVS_DOCUMENTS_TABLE_NAME} ({columns_expr}) "
             + f"VALUES ({placeholders})"
         )
         if verbose:
@@ -372,7 +376,7 @@ class Documents:
         Remove a document from the DuckDB database by its ID.
         """
         # Prepare delete query
-        query = f"DELETE FROM {dvs.DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
+        query = f"DELETE FROM {dvs.DVS_DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
         parameters = [document_id]
         if verbose:
             self.dvs.settings.console.print(
@@ -403,7 +407,7 @@ class Documents:
         columns = list(DocumentType.model_json_schema()["properties"].keys())
         columns_expr = ",".join(columns)
 
-        query = f"SELECT {columns_expr} FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
+        query = f"SELECT {columns_expr} FROM {dvs.DVS_DOCUMENTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
@@ -471,7 +475,7 @@ class Documents:
         """
         Count the number of documents in the DuckDB database with optional filters.
         """
-        query = f"SELECT COUNT(*) FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
+        query = f"SELECT COUNT(*) FROM {dvs.DVS_DOCUMENTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
@@ -502,11 +506,11 @@ class Documents:
         Drop the documents table from the DuckDB database.
         """  # noqa: E501
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
-        query = query_template.render(table_name=dvs.DOCUMENTS_TABLE_NAME)
+        query = query_template.render(table_name=dvs.DVS_DOCUMENTS_TABLE_NAME)
 
         if verbose:
             self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.DOCUMENTS_TABLE_NAME}' with SQL:\n"
+                f"\nDropping table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL:\n"
                 + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
             )
 

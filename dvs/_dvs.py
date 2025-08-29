@@ -209,8 +209,8 @@ class DVS:
             vector=vector,
             top_k=search_req.top_k,
             embedding_dimensions=self.db_manifest.embedding_dimensions,
-            documents_table_name=dvs.DOCUMENTS_TABLE_NAME,
-            points_table_name=dvs.POINTS_TABLE_NAME,
+            documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
+            points_table_name=dvs.DVS_POINTS_TABLE_NAME,
             conn=self.conn,
             with_embedding=search_req.with_embedding,
             console=self.settings.console,
@@ -267,7 +267,7 @@ class DVS:
         from dvs.types.manifest import Manifest as ManifestType
 
         # Ensure the manifest table exists
-        if dvs.MANIFEST_TABLE_NAME not in self.db.show_table_names():
+        if dvs.DVS_MANIFEST_TABLE_NAME not in self.db.show_table_names():
             logger.debug("Manifest table does not exist, creating it")
             self.db.manifest.touch(verbose=verbose)
 

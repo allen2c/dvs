@@ -10,9 +10,9 @@ if typing.TYPE_CHECKING:
     import rich.console
 
 
-MANIFEST_TABLE_NAME = "manifest"
-POINTS_TABLE_NAME = "points"
-DOCUMENTS_TABLE_NAME = "documents"
+DVS_MANIFEST_TABLE_NAME = "manifest"
+DVS_POINTS_TABLE_NAME = "points"
+DVS_DOCUMENTS_TABLE_NAME = "documents"
 
 CACHE_DIR = pathlib.Path("./cache/dvs")
 TEMP_DIR = CACHE_DIR.joinpath("tmp")
