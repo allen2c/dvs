@@ -7,6 +7,7 @@ import duckdb
 import dvs
 import dvs.utils.openapi as openapi_utils
 from dvs.types.manifest import Manifest as ManifestType
+from dvs.utils.debug_print import debug_print
 from dvs.utils.display import DISPLAY_SQL_PARAMS, DISPLAY_SQL_QUERY
 from dvs.utils.timer import Timer
 
@@ -96,11 +97,11 @@ class Manifest:
             ManifestType.model_json_schema(), table_name=dvs.DVS_MANIFEST_TABLE_NAME
         ).strip()
 
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
+            title="Creating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
+            verbose=verbose,
+        )
 
         try:
             self.dvs.conn.sql(create_table_sql)
@@ -122,11 +123,11 @@ class Manifest:
 
         query = f"SELECT {columns_expr} FROM {dvs.DVS_MANIFEST_TABLE_NAME}"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nRetrieving manifest with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            title="Retrieving manifest with SQL:",
+            verbose=verbose,
+        )
 
         result = self.dvs.conn.execute(query).fetchone()
 
@@ -157,12 +158,12 @@ class Manifest:
             + f"VALUES ({placeholders})"
         )
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nCreating manifest with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Creating manifest with SQL:",
+            verbose=verbose,
+        )
 
         self.dvs.conn.executemany(query, parameters)
 
@@ -174,10 +175,10 @@ class Manifest:
         """
         query = f"DROP TABLE IF EXISTS {dvs.DVS_MANIFEST_TABLE_NAME}"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            title=f"Dropping table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
+            verbose=verbose,
+        )
 
         self.dvs.conn.execute(query)

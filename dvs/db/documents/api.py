@@ -11,6 +11,7 @@ import dvs
 import dvs.utils.openapi as openapi_utils
 from dvs.types.document import Document as DocumentType
 from dvs.types.paginations import Pagination
+from dvs.utils.debug_print import debug_print
 from dvs.utils.display import (
     DISPLAY_SQL_PARAMS,
     DISPLAY_SQL_QUERY,
@@ -279,11 +280,11 @@ class Documents:
             # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
             indexes=["content_md5", "source_id"],
         )
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
+            title="Creating table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
+            verbose=verbose,
+        )
 
         try:
             self.dvs.conn.sql(create_table_sql)
@@ -312,12 +313,13 @@ class Documents:
             + "WHERE document_id = ?"
         )
         parameters = [document_id]
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nRetrieving document: '{document_id}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title=f"Retrieving document: '{document_id}' with SQL:",
+            verbose=verbose,
+        )
 
         result = self.dvs.conn.execute(query, parameters).fetchone()
 
@@ -358,13 +360,13 @@ class Documents:
             f"INSERT INTO {dvs.DVS_DOCUMENTS_TABLE_NAME} ({columns_expr}) "
             + f"VALUES ({placeholders})"
         )
-        if verbose:
-            _display_params = display_sql_parameters(parameters)
-            self.dvs.settings.console.print(
-                "\nCreating documents with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}\n"
-            )
+
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
+            title="Creating documents with SQL:",
+            verbose=verbose,
+        )
 
         # Create documents
         self.dvs.conn.executemany(query, parameters)
@@ -378,12 +380,12 @@ class Documents:
         # Prepare delete query
         query = f"DELETE FROM {dvs.DVS_DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
         parameters = [document_id]
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDeleting document: '{document_id}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Deleting document with SQL:",
+            verbose=verbose,
+        )
 
         # Delete document
         self.dvs.conn.execute(query, parameters)
@@ -435,12 +437,12 @@ class Documents:
         fetch_limit = limit + 1
         query += f"LIMIT {fetch_limit}"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nListing documents with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Listing documents with SQL:",
+            verbose=verbose,
+        )
 
         results = self.dvs.conn.execute(query, parameters).fetchall()
         results = [
@@ -489,12 +491,12 @@ class Documents:
         if where_clauses:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nCounting documents with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Counting documents with SQL:",
+            verbose=verbose,
+        )
 
         result = self.dvs.conn.execute(query, parameters).fetchone()
         count = result[0] if result else 0
@@ -508,11 +510,11 @@ class Documents:
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
         query = query_template.render(table_name=dvs.DVS_DOCUMENTS_TABLE_NAME)
 
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            title=f"Dropping table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
+            verbose=verbose,
+        )
 
         # Drop table
         self.dvs.conn.sql(query)

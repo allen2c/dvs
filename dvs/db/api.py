@@ -2,6 +2,7 @@ import functools
 import typing
 
 import dvs
+from dvs.utils.debug_print import debug_print
 from dvs.utils.display import DISPLAY_SQL_QUERY
 from dvs.utils.sql_stmts import SQL_STMT_INSTALL_EXTENSIONS, SQL_STMT_SHOW_TABLES
 
@@ -34,11 +35,13 @@ class DB:
         Install required DuckDB extensions for the database.
         """
         verbose = self.dvs.verbose if verbose is None else verbose
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nInstalling extensions with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=SQL_STMT_INSTALL_EXTENSIONS)}\n"
-            )
+
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=SQL_STMT_INSTALL_EXTENSIONS)}",
+            title="Installing extensions with SQL",
+            verbose=verbose,
+        )
+
         self.dvs.conn.sql(SQL_STMT_INSTALL_EXTENSIONS)
 
         return True

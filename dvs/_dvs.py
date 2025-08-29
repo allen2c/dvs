@@ -72,7 +72,6 @@ class DVS:
         lines_per_chunk: int = 20,
         tokens_per_chunk: int = 500,
         verbose: bool | None = None,
-        very_verbose: bool | None = None,
     ) -> typing.Dict:
         """
         Add one or more documents to the vector similarity search database.
@@ -81,7 +80,6 @@ class DVS:
         """  # noqa: E501
 
         verbose = self.verbose if verbose is None else verbose
-        very_verbose = True if very_verbose else False
 
         # Validate documents
         docs: list["Document"] = Document.from_contents(documents)
@@ -111,11 +109,10 @@ class DVS:
         ):
             if ignore_same_content:
                 if self.db.documents.content_exists(doc.content_md5, verbose=False):
-                    if very_verbose:
-                        logger.debug(
-                            f"Document {repr(doc.name)[:12]} with content_md5 "
-                            + f"'{doc.content_md5}' already exists, skipping creation"
-                        )
+                    logger.warning(
+                        f"Document {repr(doc.name)[:12]} with content_md5 "
+                        + f"'{doc.content_md5}' already exists, skipping creation"
+                    )
                     ignored_docs_indexes.append(idx)
                     continue
         creating_docs = [

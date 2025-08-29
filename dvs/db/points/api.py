@@ -13,6 +13,7 @@ import dvs.utils.openapi as openapi_utils
 from dvs.types.paginations import Pagination
 from dvs.types.point import Point as PointType
 from dvs.utils.chunk import chunks
+from dvs.utils.debug_print import debug_print
 from dvs.utils.display import (
     DISPLAY_SQL_PARAMS,
     DISPLAY_SQL_QUERY,
@@ -381,11 +382,11 @@ class Points:
             )
         ).strip()
 
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
+            title="Creating table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL",
+            verbose=verbose,
+        )
 
         try:
             self.dvs.conn.sql(create_table_sql)
@@ -415,12 +416,13 @@ class Points:
 
         query = f"SELECT {columns_expr} FROM {dvs.DVS_POINTS_TABLE_NAME} WHERE point_id = ?"  # noqa: E501
         parameters = [point_id]
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nRetrieving point: '{point_id}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Retrieving point with SQL:",
+            verbose=verbose,
+        )
 
         result = self.dvs.conn.execute(query, parameters).fetchone()
 
@@ -492,12 +494,14 @@ class Points:
                 + f"VALUES ({placeholders})"
             )
             query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
-            if verbose and not _shown_debug:
+
+            if not _shown_debug:
                 _display_params = display_sql_parameters(parameters)
-                self.dvs.settings.console.print(
-                    "\nCreating points with SQL:\n"
-                    + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                    + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}\n"
+                debug_print(
+                    f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+                    + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}",
+                    title="Creating points with SQL:",
+                    verbose=verbose,
                 )
                 _shown_debug = True
 
@@ -516,12 +520,13 @@ class Points:
             + f"\nDELETE FROM {dvs.DVS_POINTS_TABLE_NAME} WHERE point_id = ?"
         )
         parameters = [point_id]
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDeleting point: '{point_id}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Deleting point with SQL:",
+            verbose=verbose,
+        )
 
         self.dvs.conn.execute(query, parameters)
 
@@ -573,12 +578,12 @@ class Points:
         fetch_limit = limit + 1
         query += f"LIMIT {fetch_limit}"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nListing points with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Listing points with SQL:",
+            verbose=verbose,
+        )
 
         results: typing.List[typing.Dict] = [
             {
@@ -626,12 +631,12 @@ class Points:
         if where_clauses:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nCounting points with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Counting points with SQL:",
+            verbose=verbose,
+        )
 
         result = self.dvs.conn.execute(query, parameters).fetchone()
         count = result[0] if result else 0
@@ -644,11 +649,12 @@ class Points:
         """
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
         query = query_template.render(table_name=dvs.DVS_POINTS_TABLE_NAME)
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            )
+
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            title=f"Dropping table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL",
+            verbose=verbose,
+        )
 
         # Drop table
         self.dvs.conn.sql(query)
@@ -670,12 +676,12 @@ class Points:
         query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
         parameters = [document_id, content_md5]
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nRemoving outdated points with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Removing outdated points with SQL:",
+            verbose=verbose,
+        )
 
         # Remove outdated points
         self.dvs.conn.execute(query, parameters)
@@ -719,12 +725,12 @@ class Points:
         if where_clauses:
             query += "WHERE " + " OR ".join(where_clauses) + "\n"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nRemoving points with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        debug_print(
+            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
+            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Removing points with SQL:",
+            verbose=verbose,
+        )
 
         self.dvs.conn.execute(query, parameters)
 
