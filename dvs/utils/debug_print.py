@@ -1,3 +1,5 @@
+import typing
+
 import rich.box
 import rich.console
 import rich.table
@@ -6,7 +8,7 @@ from rich_color_support import RichColorRotator, RichColorsBase
 
 
 def debug_print(
-    text: str,
+    text: typing.Any,
     *,
     title: str = "Debug Print",
     console: rich.console.Console | None = None,
@@ -23,7 +25,7 @@ def debug_print(
 
     table = rich.table.Table(box=rich.box.HORIZONTALS, width=width)
     table.add_column(title)
-    table.add_row(rich.text.Text(str(text)))
+    table.add_row(rich.text.Text(str(text)[:4000]))
     console.print(table, style=rich_color)
 
     return None
