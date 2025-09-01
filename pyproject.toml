@@ -14,6 +14,7 @@ chunkle = "*"
 diskcache = "*"
 duckdb = "^1"
 logging-bullet-train = "*"
+networkx = "^3"
 numpy = "^2"
 openai = "^1"
 openai-embeddings-model = ">=0.3.0,<1"
@@ -27,6 +28,7 @@ uuid-utils = "*"
 
 [tool.poetry.extras]
 all = []
+graph = ["networkx"]
 
 [tool.poetry.group.docs.dependencies]
 mkdocs-git-authors-plugin = "*"
@@ -45,6 +47,7 @@ codepress = "*"
 faker = "*"
 isort = "*"
 matplotlib = "*"
+networkx = "*"
 pandas = "*"
 poetry-plugin-export = "*"
 pytest = "^8"
