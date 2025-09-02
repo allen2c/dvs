@@ -19,6 +19,7 @@ from dvs.types.document import Document
 from dvs.utils.build_graph_from_documents import build_graph_from_documents
 from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
+from dvs.utils.loads_graph import load_graph
 
 VERBOSE = True
 MAX_CONCURRENCY = 4
@@ -94,7 +95,11 @@ async def main():
         verbose=VERBOSE,
     )
     dump_graph(graph, data_root.joinpath(f"{graph_stem_name}.json"), format="node_link")
-    console.log(f"Built Graph: {graph}")
+    graph_path = dump_graph(
+        graph, data_root.joinpath(f"{graph_stem_name}.gexf"), format="gexf"
+    )
+    graph = load_graph(graph_path, format="gexf")
+    console.log(f"Built Graph: {graph_path}")
 
 
 if __name__ == "__main__":
