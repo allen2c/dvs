@@ -5,19 +5,18 @@ import typing
 import agents
 
 if typing.TYPE_CHECKING:
-    from aps_agent import Fact
-    from ner_agent import Entity, NerAgent, Triplet
+    from ner_agent import NerAgent
+
+    from dvs.types.entity import Entity
+    from dvs.types.fact import Fact
+    from dvs.types.triplet import Triplet
 
 
 logger = logging.getLogger(__name__)
 
 
 async def extract_relations(
-    facts: typing.Union[
-        typing.List["Fact"],
-        typing.List[typing.Text],
-        typing.List[typing.Union["Fact", typing.Text]],
-    ],
+    facts: typing.List["Fact"],
     *,
     ner_agent: typing.Optional["NerAgent"] = None,
     model: (
@@ -27,39 +26,50 @@ async def extract_relations(
     verbose: bool = False,
 ) -> list["Triplet"]:
 
-    from ner_agent import Triplet
-
+    from dvs.types.triplet import Triplet
     from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
 
-    all_facts = [fact if isinstance(fact, typing.Text) else fact.fact for fact in facts]
     ner_agent = ner_agent or NerAgent()
+
+    total_count = len(facts)
     complete_count = 0
+
     counter_lock = asyncio.Lock()
 
-    async def run_extract_relations(fact: str):
+    async def run_extract_relations(fact: Fact) -> list["Triplet"]:
         nonlocal complete_count
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
-        logger.debug(f"Extracting relations for fact {current_idx}/{len(all_facts)}")
-        return await ner_agent.extract_relations(fact, model=model, verbose=verbose)
+        logger.debug(f"Extracting relations for fact {current_idx}/{total_count}")
+        result = await ner_agent.extract_relations(
+            fact.fact, model=model, verbose=verbose
+        )
+        return [
+            Triplet(
+                subject=triplet.subject,
+                relation=triplet.relation,
+                object=triplet.object,
+                document_id=fact.document_id,
+            )
+            for triplet in result.triplets
+        ]
 
-    relation_tasks = [run_extract_relations(fact) for fact in all_facts]
-    results = await gather_with_concurrency_limit(relation_tasks, limit=max_concurrency)
+    relation_tasks = [run_extract_relations(fact) for fact in facts]
+
+    triplets_results: list[list["Triplet"]] = await gather_with_concurrency_limit(
+        relation_tasks, limit=max_concurrency
+    )
 
     all_triplets: list[Triplet] = []
-    for res in results:
-        all_triplets.extend(res.triplets)
+    for _triplets in triplets_results:
+        all_triplets.extend(_triplets)
     logger.info(f"✅ Extracted {len(all_triplets)} raw triplets.")
 
     return all_triplets
 
 
 async def extract_entities(
-    facts: typing.Union[
-        typing.List["Fact"],
-        typing.List[typing.Text],
-        typing.List[typing.Union["Fact", typing.Text]],
-    ],
+    facts: typing.List["Fact"],
     *,
     ner_agent: typing.Optional["NerAgent"] = None,
     model: (
@@ -68,26 +78,41 @@ async def extract_entities(
     max_concurrency: int = 1,
     verbose: bool = False,
 ) -> list["Entity"]:
-    from ner_agent import Entity
-
+    from dvs.types.entity import Entity
     from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
 
-    all_facts = [fact if isinstance(fact, typing.Text) else fact.fact for fact in facts]
     ner_agent = ner_agent or NerAgent()
+
+    total_count = len(facts)
     complete_count = 0
     counter_lock = asyncio.Lock()
 
-    async def run_extract_entities(fact: str):
+    async def run_extract_entities(fact: Fact) -> list["Entity"]:
         nonlocal complete_count
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
-        logger.debug(f"Extracting entities for fact {current_idx}/{len(all_facts)}")
-        return await ner_agent.run(fact, model=model, verbose=verbose)
+        logger.debug(f"Extracting entities for fact {current_idx}/{total_count}")
+        result = await ner_agent.run(fact.fact, model=model, verbose=verbose)
+        return [
+            Entity(
+                name=entity.name,
+                value=entity.value,
+                document_id=fact.document_id,
+                start=entity.start,
+                end=entity.end,
+            )
+            for entity in result.entities
+        ]
 
-    entity_tasks = [run_extract_entities(fact) for fact in all_facts]
-    results = await gather_with_concurrency_limit(entity_tasks, limit=max_concurrency)
+    entity_tasks = [run_extract_entities(fact) for fact in facts]
 
-    all_entities: list[Entity] = [ent for result in results for ent in result.entities]
+    entities_results: list[list[Entity]] = await gather_with_concurrency_limit(
+        entity_tasks, limit=max_concurrency
+    )
+
+    all_entities: list[Entity] = [
+        ent for entities in entities_results for ent in entities
+    ]
     logger.info(f"✅ Extracted {len(all_entities)} raw entities.")
 
     return all_entities
