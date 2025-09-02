@@ -25,6 +25,7 @@ async def get_facts(
         agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel | None
     ) = None,
     max_concurrency: int = 1,
+    verbose: bool = False,
 ):
     from aps_agent import APSAgent, Fact
 
@@ -42,7 +43,7 @@ async def get_facts(
             _input_text = doc.content
             logger.info(f"Running APS on {pretty_repr(doc.name, max_string=32)}...")
 
-        return await aps_agent.run(_input_text, model=model)
+        return await aps_agent.run(_input_text, model=model, verbose=verbose)
 
     aps_result_tasks = [run_aps_agent(doc) for doc in documents]
 
