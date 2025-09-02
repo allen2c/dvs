@@ -8,13 +8,19 @@ import openai
 import openai_embeddings_model as oai_emb_model
 from aps_agent import APSAgent
 from ner_agent import NerAgent
+from openai_embeddings_model import (
+    AsyncOpenAIEmbeddingsModel,
+)
+from openai_embeddings_model import ModelSettings as EmbeddingModelSettings
 from rich.console import Console
 
 import dvs
 from dvs.types.document import Document
+from dvs.utils.build_graph_from_documents import build_graph_from_documents
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
 
 VERBOSE = True
+MAX_CONCURRENCY = 4
 
 lbt.set_logger("dvs")
 
@@ -45,6 +51,8 @@ chat_model = agents.OpenAIResponsesModel(
     model="gpt-5-nano",
     openai_client=openai_client,
 )
+emb_model = AsyncOpenAIEmbeddingsModel("text-embedding-3-small", openai_client)
+emb_settings = EmbeddingModelSettings(dimensions=512)
 
 aps_agent = APSAgent()
 ner_agent = NerAgent()
@@ -68,6 +76,20 @@ async def main():
     console.rule("[bold blue]Step 2: Build DVS[/bold blue]")
     created_result = dvs_client.add(documents, verbose=VERBOSE)
     console.log(f"Created DVS result: {created_result}")
+
+    # --- Step 3: Build Graph ---
+    console.rule("[bold blue]Step 3: Build Graph[/bold blue]")
+    graph = build_graph_from_documents(
+        documents,
+        chat_model=chat_model,
+        embeddings_model=emb_model,
+        embeddings_model_settings=emb_settings,
+        aps_agent=aps_agent,
+        ner_agent=ner_agent,
+        max_concurrency=MAX_CONCURRENCY,
+        verbose=VERBOSE,
+    )
+    console.log(f"Built Graph: {graph}")
 
 
 if __name__ == "__main__":
