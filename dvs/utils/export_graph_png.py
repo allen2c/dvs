@@ -13,14 +13,10 @@ def export_graph_png(
     G: "nx.DiGraph",
     output_path: pathlib.Path | str,
 ) -> None:
-
-    try:
-        import matplotlib as mpl
-        import matplotlib.pyplot as plt
-        from matplotlib import font_manager as fm
-    except ImportError:
-        logger.warning("Matplotlib not found. Skipping PNG export.")
-        return
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    from matplotlib import font_manager as fm
 
     # Prefer a CJK-capable font so Chinese is rendered correctly in PNG output
     try:
