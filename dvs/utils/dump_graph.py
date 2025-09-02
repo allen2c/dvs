@@ -7,7 +7,10 @@ if typing.TYPE_CHECKING:
 
 
 def dump_graph(
-    G: "nx.DiGraph", path: pathlib.Path | str, *, format: typing.Literal["node_link"]
+    G: "nx.DiGraph",
+    path: pathlib.Path | str,
+    *,
+    format: typing.Literal["node_link", "gexf"],
 ) -> pathlib.Path:
     import networkx as nx
 
@@ -17,6 +20,9 @@ def dump_graph(
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(data, f)
+
+    elif format == "gexf":
+        nx.write_gexf(G, path)
 
     else:
         raise ValueError(f"Unsupported format: {format}")
