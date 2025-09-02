@@ -10,12 +10,12 @@ repository = "https://github.com/allen2c/dvs"
 version = "2.0.0"
 
 [tool.poetry.dependencies]
-aps-agent = { version = ">=0.1.0,<1", optional = true }
+aps-agent = { version = ">=0.2.0,<1", optional = true }
 chunkle = ">=0.3.0"
 diskcache = "*"
 duckdb = "^1"
 logging-bullet-train = "*"
-ner-agent = { version = ">=0.3.0,<1", optional = true }
+ner-agent = { version = ">=0.4.0,<1", optional = true }
 networkx = "^3"
 numpy = "^2"
 openai = "^1"
