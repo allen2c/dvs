@@ -88,8 +88,8 @@ class DVS:
         *,
         batch_size: int = 100,
         ignore_same_content: bool = True,
-        lines_per_chunk: int = 20,
-        tokens_per_chunk: int = 500,
+        lines_per_chunk: int = 80,
+        tokens_per_chunk: int = 1200,
         verbose: bool | None = None,
     ) -> typing.Dict:
         """

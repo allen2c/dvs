@@ -1,5 +1,6 @@
 import logging
 import pathlib
+import re
 import typing
 
 if typing.TYPE_CHECKING:
@@ -22,6 +23,10 @@ def load_documents_from_directory(
     for file_path in path.glob("*.txt"):
         try:
             content: str = file_path.read_text(encoding="utf-8")
+            sanitized_content: str = re.sub(r"\n{3,}", "\n\n", content)
+            if sanitized_content != content:
+                file_path.write_text(sanitized_content, encoding="utf-8")
+                content = sanitized_content
             doc_name: str = file_path.stem
             documents.append(Document.from_content(content, name=doc_name))
         except Exception as e:

@@ -11,7 +11,7 @@ version = "2.0.0"
 
 [tool.poetry.dependencies]
 aps-agent = { version = ">=0.1.0,<1", optional = true }
-chunkle = "*"
+chunkle = ">=0.3.0"
 diskcache = "*"
 duckdb = "^1"
 logging-bullet-train = "*"
