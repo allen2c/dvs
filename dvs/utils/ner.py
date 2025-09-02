@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import typing
 
@@ -33,10 +34,12 @@ async def extract_relations(
     all_facts = [fact if isinstance(fact, typing.Text) else fact.fact for fact in facts]
     ner_agent = ner_agent or NerAgent()
     complete_count = 0
+    counter_lock = asyncio.Lock()
 
     async def run_extract_relations(fact: str):
         nonlocal complete_count
-        current_idx = complete_count = complete_count + 1
+        async with counter_lock:
+            current_idx = complete_count = complete_count + 1
         logger.debug(f"Extracting relations for fact {current_idx}/{len(all_facts)}")
         return await ner_agent.extract_relations(fact, model=model, verbose=verbose)
 
@@ -72,10 +75,12 @@ async def extract_entities(
     all_facts = [fact if isinstance(fact, typing.Text) else fact.fact for fact in facts]
     ner_agent = ner_agent or NerAgent()
     complete_count = 0
+    counter_lock = asyncio.Lock()
 
     async def run_extract_entities(fact: str):
         nonlocal complete_count
-        current_idx = complete_count = complete_count + 1
+        async with counter_lock:
+            current_idx = complete_count = complete_count + 1
         logger.debug(f"Extracting entities for fact {current_idx}/{len(all_facts)}")
         return await ner_agent.run(fact, model=model, verbose=verbose)
 

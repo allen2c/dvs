@@ -224,6 +224,7 @@ class Document(pydantic.BaseModel):
                 update={
                     "document_id": dvs.utils.ids.get_id("doc"),
                     "content": chunk,
+                    "source_id": self.source_id,
                     "chunk_index": chunk_idx,
                 },
                 deep=True,

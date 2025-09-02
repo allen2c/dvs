@@ -17,6 +17,9 @@ def graph_from_triplets(
 
     canonical_map = canonical_map or {}
 
+    for canonical_name in canonical_map.values():
+        G.add_node(canonical_name)
+
     for triplet in triplets:
         # Normalize subject and object using the complete map
         subject_norm = canonical_map.get(triplet.subject, triplet.subject)
@@ -26,8 +29,7 @@ def graph_from_triplets(
         G.add_node(object_norm)
         G.add_edge(subject_norm, object_norm, label=triplet.relation)
 
-    logger.info("[bold green]✨ Knowledge Graph Construction Complete! ✨[/bold green]")
-    logger.info(f"Total Nodes: {G.number_of_nodes()}")
-    logger.info(f"Total Edges: {G.number_of_edges()}")
+    logger.info("✨ Knowledge Graph Construction Complete! ✨")
+    logger.info(f"Total Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
 
     return G

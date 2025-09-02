@@ -38,11 +38,19 @@ async def build_graph_from_documents(
         raise ValueError("No documents provided")
 
     # Abstractive Proposition Segmentation (APS)
-    all_facts = await get_facts(documents, aps_agent=aps_agent, model=chat_model)
+    all_facts = await get_facts(
+        documents,
+        aps_agent=aps_agent,
+        model=chat_model,
+        max_concurrency=max_concurrency,
+    )
 
     # Relation Extraction
     all_triplets = await extract_relations(
-        all_facts, ner_agent=ner_agent, model=chat_model
+        all_facts,
+        ner_agent=ner_agent,
+        model=chat_model,
+        max_concurrency=max_concurrency,
     )
 
     # Optional NER Extraction

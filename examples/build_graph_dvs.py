@@ -17,6 +17,7 @@ from rich.console import Console
 import dvs
 from dvs.types.document import Document
 from dvs.utils.build_graph_from_documents import build_graph_from_documents
+from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
 
 VERBOSE = True
@@ -29,6 +30,7 @@ console = Console()
 data_root = pathlib.Path(__file__).parent.parent.joinpath("data")
 documents_dir = data_root.joinpath("demo_documents")
 duckdb_path = data_root.joinpath("example_graph_dvs.duckdb")
+graph_stem_name = "example_graph_dvs"
 
 if duckdb_path.is_file():
     duckdb_path.unlink()
@@ -59,7 +61,9 @@ ner_agent = NerAgent()
 
 
 def load_documents(directory_path: pathlib.Path | str) -> list[Document]:
-    documents: list[Document] = load_documents_from_directory("./data/demo_documents/")
+    documents: list[Document] = load_documents_from_directory(
+        data_root.joinpath("demo_documents")
+    )
     if not documents:
         raise ValueError(f"No documents found in {directory_path}")
     return documents
@@ -79,7 +83,7 @@ async def main():
 
     # --- Step 3: Build Graph ---
     console.rule("[bold blue]Step 3: Build Graph[/bold blue]")
-    graph = build_graph_from_documents(
+    graph = await build_graph_from_documents(
         documents,
         chat_model=chat_model,
         embeddings_model=emb_model,
@@ -89,6 +93,7 @@ async def main():
         max_concurrency=MAX_CONCURRENCY,
         verbose=VERBOSE,
     )
+    dump_graph(graph, data_root.joinpath(f"{graph_stem_name}.json"), format="node_link")
     console.log(f"Built Graph: {graph}")
 
 
