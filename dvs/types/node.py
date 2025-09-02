@@ -15,9 +15,9 @@ class Node(pydantic.BaseModel):
         ...,
         description="Label of the node.",
     )
-    document_ids: str = pydantic.Field(
+    kind: typing.Literal["entity", "document"] = pydantic.Field(
         ...,
-        description="Identifier of the associated documents separated by comma.",
+        description="Kind of the node.",
     )
 
     @pydantic.model_validator(mode="after")
@@ -27,12 +27,4 @@ class Node(pydantic.BaseModel):
             raise ValueError("Label is required")
         else:
             self.label = _label
-        return self
-
-    def merge(self, other: "Node") -> typing.Self:
-        if self.label != other.label:
-            raise ValueError("Labels do not match")
-
-        _ids = set(self.document_ids.split(",")) | set(other.document_ids.split(","))
-        self.document_ids = ",".join(sorted(_ids))
         return self

@@ -47,7 +47,7 @@ async def extract_relations(
         return [
             Triplet(
                 subject=triplet.subject,
-                relation=triplet.relation,
+                relation=triplet.relation,  # type: ignore
                 object=triplet.object,
                 document_id=fact.document_id,
             )

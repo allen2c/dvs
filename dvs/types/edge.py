@@ -11,36 +11,24 @@ class Edge(pydantic.BaseModel):
         default_factory=lambda: dvs.utils.ids.get_id("e"),
         description="Unique identifier for the edge.",
     )
-    label: str = pydantic.Field(
+    relation: typing.Literal["is_a", "has_a", "related_to", "is_from"] = pydantic.Field(
         ...,
-        description="Label of the node.",
+        description="Relation of the edge.",
     )
     from_node: str = pydantic.Field(
         ...,
-        description="Identifier label name of the from node.",
+        description="Identifier label name of the from node label.",
     )
     to_node: str = pydantic.Field(
         ...,
-        description="Identifier label name of the to node.",
-    )
-    document_ids: str = pydantic.Field(
-        ...,
-        description="Identifier of the associated documents separated by comma.",
+        description="Identifier label name of the to node label.",
     )
 
     @pydantic.model_validator(mode="after")
-    def validate_label(self) -> typing.Self:
-        _label = str_or_none(self.label)
-        if _label is None:
-            raise ValueError("Label is required")
+    def validate_relation(self) -> typing.Self:
+        _relation = str_or_none(self.relation)
+        if _relation is None:
+            raise ValueError("Relation is required")
         else:
-            self.label = _label
-        return self
-
-    def merge(self, other: "Edge") -> typing.Self:
-        if self.label != other.label:
-            raise ValueError("Labels do not match")
-
-        _ids = set(self.document_ids.split(",")) | set(other.document_ids.split(","))
-        self.document_ids = ",".join(sorted(_ids))
+            self.relation = _relation  # type: ignore
         return self

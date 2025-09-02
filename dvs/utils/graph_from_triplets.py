@@ -3,13 +3,19 @@ import typing
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-    from ner_agent import Triplet
+
+    from dvs.types.entity import Entity
+    from dvs.types.triplet import Triplet
 
 logger = logging.getLogger(__name__)
 
 
 def graph_from_triplets(
-    triplets: list["Triplet"], *, canonical_map: dict[str, str] | None = None
+    triplets: list["Triplet"],
+    *,
+    canonical_map: dict[str, str] | None = None,
+    labels: list[str] | None = None,
+    extra_entities: list["Entity"] | None = None,
 ) -> "nx.DiGraph":
     import networkx as nx
 

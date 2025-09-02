@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_valid_canonical_map(
-    entities: list[str],
+    labels: list[str],
     *,
     embedding_model: oai_emb_model.AsyncOpenAIEmbeddingsModel,
     model_settings: oai_emb_model.ModelSettings,
@@ -34,7 +34,7 @@ async def get_valid_canonical_map(
 
     # 1. Embedding
     response = await embedding_model.get_embeddings(
-        input=entities, model_settings=model_settings
+        input=labels, model_settings=model_settings
     )
     embeddings = response.to_numpy()
 
@@ -42,14 +42,14 @@ async def get_valid_canonical_map(
     clustering = sklearn.cluster.DBSCAN(
         eps=clustering_eps, min_samples=clustering_min_samples, metric="cosine"
     ).fit(embeddings)
-    labels = clustering.labels_
+    clusters_labels = clustering.labels_
 
     clusters: typing.Dict[int, list[str]] = {}
-    for i, label in enumerate(labels):
+    for i, label in enumerate(clusters_labels):
         if label not in clusters:
             clusters[label] = []
-        clusters[label].append(entities[i])
-    logger.info(f"✅ Clustered entities into {len(set(labels)) - 1} groups.")
+        clusters[label].append(labels[i])
+    logger.info(f"✅ Clustered entities into {len(set(clusters_labels)) - 1} groups.")
 
     # 3. LLM Validation and Canonical Map Generation
     canonical_map: typing.Dict[str, str] = {}
@@ -75,9 +75,9 @@ async def get_valid_canonical_map(
                 canonical_map[format_string(item)] = result.canonical_name
 
     # Handle non-synonyms, single-item clusters, and noise (they map to themselves)
-    for entity in entities:
-        if entity not in canonical_map:
-            canonical_map[entity] = entity
-    logger.info(f"✅ Generated canonical map for all {len(entities)} entities.")
+    for _label in labels:
+        if _label not in canonical_map:
+            canonical_map[_label] = _label
+    logger.info(f"✅ Generated canonical map for all {len(labels)} labels.")
 
     return canonical_map
