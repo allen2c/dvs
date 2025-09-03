@@ -8,8 +8,8 @@
     <title>Graph Visualization with Sigma.js</title>
     <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.1/dist/graphology.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/build/graphology-layout-forceatlas2.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/graphology-layout-force@0.6.1/build/graphology-layout-force.min.js"></script>
+    <script src="https://unpkg.com/graphology-layout-forceatlas2@0.10.1/build/graphology-layout-forceatlas2.min.js"></script>
+    <script src="https://unpkg.com/graphology-layout-force@0.6.1/build/graphology-layout-force.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/graphology-layout@0.17.2/build/graphology-layout.min.js"></script>
     <style>
         body {
@@ -79,32 +79,51 @@
             cursor: pointer;
             margin-right: 5px;
             margin-bottom: 5px;
+            transition: background-color 0.2s;
         }
 
         button:hover {
             background: #0056b3;
         }
 
+        button:active {
+            background: #004085;
+        }
+
         .info {
             position: absolute;
             bottom: 20px;
             left: 20px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 18px;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
             z-index: 1000;
+            min-width: 200px;
+            font-size: 13px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .info strong {
+            color: #2c3e50;
+            font-size: 14px;
         }
 
         .legend {
             position: absolute;
             bottom: 20px;
             right: 20px;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             padding: 15px;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
             z-index: 1000;
+            border: 1px solid #e0e0e0;
+        }
+
+        .legend h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
         }
 
         .legend-item {
@@ -128,6 +147,60 @@
             border-radius: 4px;
             margin: 20px;
         }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            border-radius: 8px;
+        }
+
+        .loading-content {
+            text-align: center;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 200px;
+            height: 8px;
+            background: #f3f3f3;
+            border-radius: 4px;
+            margin: 10px auto;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #007bff;
+            width: 0%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
@@ -140,17 +213,28 @@
         <div class="graph-container">
             <div id="graph"></div>
 
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3 id="loading-title">Applying Layout...</h3>
+                    <p id="loading-status">Initializing...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                </div>
+            </div>
+
             <div class="controls">
                 <div class="control-group">
                     <label>View Controls</label>
                     <button onclick="resetCamera()">Reset View</button>
-                    <button onclick="stopLayout()">Stop Layout</button>
+                    <button onclick="stopLayout()" id="stop-layout-btn">Stop Layout</button>
                 </div>
                 <div class="control-group">
                     <label>Layout Algorithms</label>
-                    <button onclick="applyForceAtlas2()">ForceAtlas2</button>
-                    <button onclick="applyForceLayout()">Force</button>
+                    <button onclick="applyForceDirected()">Force Directed</button>
                     <button onclick="applyCircularLayout()">Circular</button>
+                    <button onclick="applyForceAtlas2()" id="forceatlas2-btn" style="display: none;">ForceAtlas2</button>
                 </div>
                 <div class="control-group">
                     <label>Node Filters</label>
@@ -184,6 +268,7 @@
         let layoutRunning = false;
         let layoutWorker = null;
         let originalData;
+        let currentLayoutAnimation = null;
 
         // Color mapping for different node types
         const nodeColors = {
@@ -276,8 +361,8 @@
                     color: color,
                     kind: node.kind,
                     entity: node.entity,
-                    x: 0,
-                    y: 0
+                    x: (Math.random() - 0.5) * 800,
+                    y: (Math.random() - 0.5) * 800
                 };
             });
 
@@ -286,97 +371,116 @@
                 source: edge.source,
                 target: edge.target,
                 label: edge.relation,
-                color: '#bdc3c7',
-                size: 2
+                color: '#95a5a6',
+                size: 1.5
             }));
 
             return { nodes, edges };
         }
 
                 function applyLayout() {
-            // Start with circular layout as default
-            applyCircularLayout();
+            // Start with random positions, no initial layout
+            console.log('Graph initialized with random positions');
+        }
+
+                // Main Force-Directed Layout - Enhanced version of SimpleForce
+        function applyForceDirected() {
+            if (!graph || layoutRunning) return;
+
+            stopLayout();
+            showLoadingOverlay('Force Directed Layout', 'Calculating optimal positions...');
+            console.log('Applying Enhanced Force Directed layout...');
+
+            applyEnhancedForceLayout();
         }
 
         function applyForceAtlas2() {
             if (!graph || layoutRunning) return;
 
             stopLayout();
+            showLoadingOverlay('ForceAtlas2 Layout', 'Optimizing node positions...');
             console.log('Applying ForceAtlas2 layout...');
 
             try {
                 layoutRunning = true;
 
-                // ForceAtlas2 settings optimized for complex networks
+                // Reduced iterations for better performance
+                const totalIterations = Math.min(20, Math.max(10, Math.ceil(graph.nodes().length / 10)));
+
                 const settings = {
-                    iterations: 100,
+                    iterations: totalIterations,
                     settings: {
-                        gravity: 0.5,
-                        scalingRatio: 1.0,
+                        gravity: 0.3,
+                        scalingRatio: 2.0,
                         strongGravityMode: false,
                         barnesHutOptimize: true,
-                        barnesHutTheta: 0.8,
-                        slowDown: 5,
+                        barnesHutTheta: 1.2,
+                        slowDown: 3,
                         linLogMode: false,
                         outboundAttractionDistribution: false,
                         adjustSizes: false,
-                        edgeWeightInfluence: 1.0
+                        edgeWeightInfluence: 0.8
                     }
                 };
 
                 if (typeof graphologyLayoutForceAtlas2 !== 'undefined') {
-                    // Run ForceAtlas2
-                    graphologyLayoutForceAtlas2.assign(graph, settings);
-                    if (renderer) renderer.refresh();
-
-                    console.log('ForceAtlas2 layout applied successfully');
+                    // Run async with progress updates
+                    runForceAtlas2Async(settings, totalIterations);
                 } else {
-                    console.warn('ForceAtlas2 not available, using fallback');
-                    applyForceLayout();
+                    console.warn('ForceAtlas2 not available, using enhanced force layout');
+                    hideLoadingOverlay();
+                    applyEnhancedForceLayout();
                 }
 
             } catch (error) {
                 console.error('Error applying ForceAtlas2:', error);
-                applyForceLayout(); // Fallback
-            } finally {
-                setTimeout(() => { layoutRunning = false; }, 2000);
+                hideLoadingOverlay();
+                applyEnhancedForceLayout(); // Fallback
             }
         }
 
-        function applyForceLayout() {
-            if (!graph || layoutRunning) return;
+        function runForceAtlas2Async(settings, totalIterations) {
+            let currentIteration = 0;
+            const batchSize = 5; // Process 5 iterations at a time
 
-            stopLayout();
-            console.log('Applying Force layout...');
-
-            try {
-                layoutRunning = true;
-
-                const settings = {
-                    iterations: 50,
-                    attraction: 0.0005,
-                    repulsion: 0.1,
-                    gravity: 0.0001,
-                    inertia: 0.6,
-                    maxMove: 100
-                };
-
-                if (typeof graphologyLayoutForce !== 'undefined') {
-                    graphologyLayoutForce.assign(graph, settings);
+            function processBatch() {
+                if (currentIteration >= totalIterations || !layoutRunning) {
+                    layoutRunning = false;
+                    hideLoadingOverlay();
                     if (renderer) renderer.refresh();
-                    console.log('Force layout applied successfully');
-                } else {
-                    // Simple force simulation fallback
-                    applySimpleForceLayout();
+                    console.log('ForceAtlas2 layout completed successfully');
+                    return;
                 }
 
-            } catch (error) {
-                console.error('Error applying Force layout:', error);
-                applySimpleForceLayout();
-            } finally {
-                setTimeout(() => { layoutRunning = false; }, 1500);
+                // Update progress
+                const progress = (currentIteration / totalIterations) * 100;
+                updateProgress(progress, `Iteration ${currentIteration}/${totalIterations}`);
+
+                // Run a batch of iterations
+                const batchSettings = {
+                    ...settings,
+                    iterations: Math.min(batchSize, totalIterations - currentIteration)
+                };
+
+                try {
+                    graphologyLayoutForceAtlas2.assign(graph, batchSettings);
+                    if (renderer) renderer.refresh();
+                    currentIteration += batchSettings.iterations;
+                } catch (error) {
+                    console.error('Error in ForceAtlas2 batch:', error);
+                    layoutRunning = false;
+                    hideLoadingOverlay();
+                    return;
+                }
+
+                // Schedule next batch
+                currentLayoutAnimation = requestAnimationFrame(processBatch);
             }
+
+            processBatch();
         }
+
+                // Force Layout functions removed - only ForceAtlas2 and Circular layouts available
 
         function applyCircularLayout() {
             if (!graph) return;
@@ -439,23 +543,49 @@
             console.log('Circular layout applied successfully');
         }
 
-        function applySimpleForceLayout() {
-            // Simple force-directed layout implementation
+        function applyEnhancedForceLayout() {
+            showLoadingOverlay('Force Directed Layout', 'Computing optimal positions...');
+            layoutRunning = true;
+
             const nodes = graph.nodes();
             const edges = graph.edges();
+            const nodeCount = nodes.length;
+            const edgeCount = edges.length;
 
-            // Initialize random positions if not set
+            // Adaptive parameters based on graph size - optimized for maximum dispersion
+            const totalIterations = Math.min(500, Math.max(30, Math.ceil(nodeCount / 2)));
+            const optimalDistance = Math.max(180, Math.min(450, Math.sqrt(nodeCount) * 35)); // Much larger optimal distance
+            const canvasSize = Math.max(1200, nodeCount * 30); // Much larger canvas
+            const repulsionStrength = Math.max(2.5, 4.0 - (nodeCount / 80)); // Significantly stronger repulsion
+
+            // Initialize positions if not set
             nodes.forEach(node => {
                 if (!graph.hasNodeAttribute(node, 'x')) {
-                    graph.setNodeAttribute(node, 'x', (Math.random() - 0.5) * 1000);
+                    graph.setNodeAttribute(node, 'x', (Math.random() - 0.5) * canvasSize);
                 }
                 if (!graph.hasNodeAttribute(node, 'y')) {
-                    graph.setNodeAttribute(node, 'y', (Math.random() - 0.5) * 1000);
+                    graph.setNodeAttribute(node, 'y', (Math.random() - 0.5) * canvasSize);
                 }
             });
 
-            // Run simulation
-            for (let iteration = 0; iteration < 100; iteration++) {
+            let currentIteration = 0;
+            let temperature = 1.0;
+
+            function processIteration() {
+                if (currentIteration >= totalIterations || !layoutRunning) {
+                    layoutRunning = false;
+                    hideLoadingOverlay();
+                    if (renderer) renderer.refresh();
+                    console.log('Enhanced Force Directed layout completed successfully');
+                    return;
+                }
+
+                // Update progress
+                const progress = (currentIteration / totalIterations) * 100;
+                updateProgress(progress, `Iteration ${currentIteration}/${totalIterations}`);
+
+                // Cool down temperature
+                temperature = 1.0 - (currentIteration / totalIterations);
                 const forces = {};
 
                 // Initialize forces
@@ -463,7 +593,151 @@
                     forces[node] = { x: 0, y: 0 };
                 });
 
-                // Repulsion between all nodes
+                                // Enhanced repulsion forces for maximum dispersion
+                const maxRepulsionDistance = optimalDistance * 5; // Even larger range
+                nodes.forEach((node1, i) => {
+                    const pos1 = {
+                        x: graph.getNodeAttribute(node1, 'x'),
+                        y: graph.getNodeAttribute(node1, 'y')
+                    };
+
+                    nodes.slice(i + 1).forEach(node2 => {
+                        const pos2 = {
+                            x: graph.getNodeAttribute(node2, 'x'),
+                            y: graph.getNodeAttribute(node2, 'y')
+                        };
+
+                        const dx = pos1.x - pos2.x;
+                        const dy = pos1.y - pos2.y;
+                        const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+
+                        // Skip if too far away
+                        if (distance > maxRepulsionDistance) return;
+
+                        // Much stronger repulsion with exponential falloff for maximum dispersion
+                        const normalizedDistance = Math.max(distance / optimalDistance, 0.1);
+                        const repulsionForce = (repulsionStrength * optimalDistance * 1.5) / (normalizedDistance * normalizedDistance);
+                        const force = Math.min(repulsionForce, optimalDistance * 1.2);
+
+                        forces[node1].x += (dx / distance) * force;
+                        forces[node1].y += (dy / distance) * force;
+                        forces[node2].x -= (dx / distance) * force;
+                        forces[node2].y -= (dy / distance) * force;
+                    });
+                });
+
+                                // Enhanced spring forces along edges for better structure
+                edges.forEach(edge => {
+                    const [source, target] = graph.extremities(edge);
+                    const pos1 = {
+                        x: graph.getNodeAttribute(source, 'x'),
+                        y: graph.getNodeAttribute(source, 'y')
+                    };
+                    const pos2 = {
+                        x: graph.getNodeAttribute(target, 'x'),
+                        y: graph.getNodeAttribute(target, 'y')
+                    };
+
+                    const dx = pos2.x - pos1.x;
+                    const dy = pos2.y - pos1.y;
+                    const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+
+                    // Adaptive spring force - stronger when far from optimal distance
+                    const distanceRatio = distance / optimalDistance;
+                    let springStrength = 0.15; // Base strength
+
+                    if (distanceRatio > 2.0) {
+                        // Too far - stronger attraction
+                        springStrength = 0.3 * Math.min(distanceRatio, 3.0);
+                    } else if (distanceRatio < 0.7) {
+                        // Too close - much weaker attraction to allow more dispersion
+                        springStrength = 0.02;
+                    }
+
+                    const springForce = (distance - optimalDistance) * springStrength;
+
+                    forces[source].x += (dx / distance) * springForce;
+                    forces[source].y += (dy / distance) * springForce;
+                    forces[target].x -= (dx / distance) * springForce;
+                    forces[target].y -= (dy / distance) * springForce;
+                });
+
+                // Apply forces with temperature-based damping - allow larger movements
+                const dampening = 0.15 * temperature + 0.03;
+                const maxMove = optimalDistance * temperature * 0.5;
+
+                nodes.forEach(node => {
+                    const currentX = graph.getNodeAttribute(node, 'x');
+                    const currentY = graph.getNodeAttribute(node, 'y');
+
+                    // Limit force magnitude
+                    const forceMagnitude = Math.sqrt(forces[node].x * forces[node].x + forces[node].y * forces[node].y);
+                    if (forceMagnitude > maxMove) {
+                        forces[node].x = (forces[node].x / forceMagnitude) * maxMove;
+                        forces[node].y = (forces[node].y / forceMagnitude) * maxMove;
+                    }
+
+                    graph.setNodeAttribute(node, 'x', currentX + forces[node].x * dampening);
+                    graph.setNodeAttribute(node, 'y', currentY + forces[node].y * dampening);
+                });
+
+                currentIteration++;
+
+                // Refresh every few iterations to show progress
+                if (currentIteration % 2 === 0 && renderer) {
+                    renderer.refresh();
+                }
+
+                // Schedule next iteration
+                currentLayoutAnimation = requestAnimationFrame(processIteration);
+            }
+
+            processIteration();
+        }
+
+        // Keep old function for compatibility
+        function applySimpleForceLayout() {
+            showLoadingOverlay('Simple Force Layout', 'Computing positions...');
+            layoutRunning = true;
+
+            const nodes = graph.nodes();
+            const edges = graph.edges();
+            const totalIterations = Math.min(40, Math.max(20, Math.ceil(nodes.length / 5))); // Adaptive iterations
+
+            // Initialize random positions if not set
+            nodes.forEach(node => {
+                if (!graph.hasNodeAttribute(node, 'x')) {
+                    graph.setNodeAttribute(node, 'x', (Math.random() - 0.5) * 800);
+                }
+                if (!graph.hasNodeAttribute(node, 'y')) {
+                    graph.setNodeAttribute(node, 'y', (Math.random() - 0.5) * 800);
+                }
+            });
+
+            let currentIteration = 0;
+
+            function processIteration() {
+                if (currentIteration >= totalIterations || !layoutRunning) {
+                    layoutRunning = false;
+                    hideLoadingOverlay();
+                    if (renderer) renderer.refresh();
+                    console.log('Simple force layout completed successfully');
+                    return;
+                }
+
+                // Update progress
+                const progress = (currentIteration / totalIterations) * 100;
+                updateProgress(progress, `Iteration ${currentIteration}/${totalIterations}`);
+
+                const forces = {};
+                const repulsionStrength = Math.max(5000, 10000 / Math.sqrt(nodes.length)); // Adaptive repulsion
+
+                // Initialize forces
+                nodes.forEach(node => {
+                    forces[node] = { x: 0, y: 0 };
+                });
+
+                // Repulsion between all nodes (optimized)
                 nodes.forEach((node1, i) => {
                     nodes.slice(i + 1).forEach(node2 => {
                         const pos1 = {
@@ -478,7 +752,7 @@
                         const dx = pos1.x - pos2.x;
                         const dy = pos1.y - pos2.y;
                         const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-                        const force = 10000 / (distance * distance);
+                        const force = repulsionStrength / (distance * distance);
 
                         forces[node1].x += (dx / distance) * force;
                         forces[node1].y += (dy / distance) * force;
@@ -502,7 +776,7 @@
                     const dx = pos2.x - pos1.x;
                     const dy = pos2.y - pos1.y;
                     const distance = Math.sqrt(dx * dx + dy * dy);
-                    const force = distance * 0.01;
+                    const force = distance * 0.008;
 
                     forces[source].x += (dx / distance) * force;
                     forces[source].y += (dy / distance) * force;
@@ -510,19 +784,28 @@
                     forces[target].y -= (dy / distance) * force;
                 });
 
-                // Apply forces with damping
+                // Apply forces with adaptive damping
+                const dampening = Math.max(0.6, 0.9 - (currentIteration / totalIterations) * 0.3);
                 nodes.forEach(node => {
                     const currentX = graph.getNodeAttribute(node, 'x');
                     const currentY = graph.getNodeAttribute(node, 'y');
-                    const dampening = 0.8;
 
                     graph.setNodeAttribute(node, 'x', currentX + forces[node].x * dampening);
                     graph.setNodeAttribute(node, 'y', currentY + forces[node].y * dampening);
                 });
+
+                currentIteration++;
+
+                // Refresh every few iterations to show progress
+                if (currentIteration % 3 === 0 && renderer) {
+                    renderer.refresh();
+                }
+
+                // Schedule next iteration
+                currentLayoutAnimation = requestAnimationFrame(processIteration);
             }
 
-            if (renderer) renderer.refresh();
-            console.log('Simple force layout applied successfully');
+            processIteration();
         }
 
         function stopLayout() {
@@ -530,31 +813,141 @@
                 layoutWorker.kill();
                 layoutWorker = null;
             }
+            if (currentLayoutAnimation) {
+                cancelAnimationFrame(currentLayoutAnimation);
+                currentLayoutAnimation = null;
+            }
             layoutRunning = false;
+            hideLoadingOverlay();
             console.log('Layout stopped');
         }
 
+        // Store original node and edge styles for hover functionality
+        let hoveredNode = null;
+        let originalNodeStyles = {};
+        let originalEdgeStyles = {};
+
         function setupEventListeners() {
-            // Node hover events
+            // Node hover events with highlighting
             renderer.on('enterNode', (event) => {
-                const node = graph.getNodeAttributes(event.node);
+                const nodeId = event.node;
+                const node = graph.getNodeAttributes(nodeId);
+
+                // Update info panel
                 const nodeInfo = document.getElementById('node-info');
                 nodeInfo.innerHTML = `
                     <strong>${node.label}</strong><br>
                     Type: ${node.kind}<br>
                     ${node.entity ? `Entity: ${node.entity}<br>` : ''}
-                    ID: ${event.node}
+                    ID: ${nodeId}
                 `;
+
+                // Apply hover highlighting
+                applyHoverHighlight(nodeId);
             });
 
             renderer.on('leaveNode', () => {
                 document.getElementById('node-info').innerHTML = 'Hover over a node to see details';
+
+                // Remove hover highlighting
+                removeHoverHighlight();
             });
 
             // Click events
             renderer.on('clickNode', (event) => {
                 console.log('Clicked node:', event.node, graph.getNodeAttributes(event.node));
             });
+        }
+
+        function applyHoverHighlight(hoveredNodeId) {
+            if (hoveredNode === hoveredNodeId) return; // Already highlighted
+
+            // Clear previous highlight
+            removeHoverHighlight();
+
+            hoveredNode = hoveredNodeId;
+
+            // Get connected nodes and edges
+            const connectedNodes = new Set([hoveredNodeId]);
+            const connectedEdges = new Set();
+
+            // Find all neighbors and connecting edges
+            graph.forEachEdge(hoveredNodeId, (edge, attributes, source, target) => {
+                connectedEdges.add(edge);
+                connectedNodes.add(source === hoveredNodeId ? target : source);
+            });
+
+            // Store original styles and apply new ones
+            graph.forEachNode((nodeId, attributes) => {
+                originalNodeStyles[nodeId] = {
+                    color: attributes.color,
+                    size: attributes.size
+                };
+
+                if (connectedNodes.has(nodeId)) {
+                    // Highlight connected nodes
+                    if (nodeId === hoveredNodeId) {
+                        // Main hovered node - make it bigger and brighter
+                        graph.setNodeAttribute(nodeId, 'color', '#ff6b35');
+                        graph.setNodeAttribute(nodeId, 'size', attributes.size * 1.8);
+                    } else {
+                        // Connected neighbors - slight highlight
+                        graph.setNodeAttribute(nodeId, 'color', '#ffab00');
+                        graph.setNodeAttribute(nodeId, 'size', attributes.size * 1.3);
+                    }
+                } else {
+                    // Dim non-connected nodes
+                    graph.setNodeAttribute(nodeId, 'color', '#cccccc');
+                    graph.setNodeAttribute(nodeId, 'size', attributes.size * 0.7);
+                }
+            });
+
+            // Handle edge highlighting
+            graph.forEachEdge((edgeId, attributes) => {
+                originalEdgeStyles[edgeId] = {
+                    color: attributes.color,
+                    size: attributes.size
+                };
+
+                if (connectedEdges.has(edgeId)) {
+                    // Highlight connected edges
+                    graph.setEdgeAttribute(edgeId, 'color', '#ff6b35');
+                    graph.setEdgeAttribute(edgeId, 'size', Math.max(attributes.size * 2, 3));
+                } else {
+                    // Dim non-connected edges
+                    graph.setEdgeAttribute(edgeId, 'color', '#e0e0e0');
+                    graph.setEdgeAttribute(edgeId, 'size', attributes.size * 0.5);
+                }
+            });
+
+            // Refresh the renderer to show changes
+            if (renderer) renderer.refresh();
+        }
+
+        function removeHoverHighlight() {
+            if (!hoveredNode) return;
+
+            // Restore original node styles
+            Object.keys(originalNodeStyles).forEach(nodeId => {
+                const original = originalNodeStyles[nodeId];
+                graph.setNodeAttribute(nodeId, 'color', original.color);
+                graph.setNodeAttribute(nodeId, 'size', original.size);
+            });
+
+            // Restore original edge styles
+            Object.keys(originalEdgeStyles).forEach(edgeId => {
+                const original = originalEdgeStyles[edgeId];
+                graph.setEdgeAttribute(edgeId, 'color', original.color);
+                graph.setEdgeAttribute(edgeId, 'size', original.size);
+            });
+
+            // Clear stored styles
+            originalNodeStyles = {};
+            originalEdgeStyles = {};
+            hoveredNode = null;
+
+            // Refresh the renderer to show changes
+            if (renderer) renderer.refresh();
         }
 
         function resetCamera() {
@@ -595,6 +988,41 @@
             renderer.refresh();
         }
 
+        // Loading overlay management functions
+        function showLoadingOverlay(title = 'Processing...', status = 'Please wait...') {
+            const overlay = document.getElementById('loading-overlay');
+            const titleElement = document.getElementById('loading-title');
+            const statusElement = document.getElementById('loading-status');
+            const progressFill = document.getElementById('progress-fill');
+
+            if (overlay && titleElement && statusElement && progressFill) {
+                titleElement.textContent = title;
+                statusElement.textContent = status;
+                progressFill.style.width = '0%';
+                overlay.style.display = 'flex';
+            }
+        }
+
+        function hideLoadingOverlay() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) {
+                overlay.style.display = 'none';
+            }
+        }
+
+        function updateProgress(percentage, status = '') {
+            const progressFill = document.getElementById('progress-fill');
+            const statusElement = document.getElementById('loading-status');
+
+            if (progressFill) {
+                progressFill.style.width = Math.min(100, Math.max(0, percentage)) + '%';
+            }
+
+            if (status && statusElement) {
+                statusElement.textContent = status;
+            }
+        }
+
         // Wait for all libraries to load, then initialize the graph
         function initializeWhenReady() {
             const requiredLibs = [
@@ -612,9 +1040,15 @@
             if (requiredLoaded) {
                 console.log('Required libraries loaded, initializing graph...');
 
-                // Log optional library status
+                // Log optional library status and show/hide buttons accordingly
                 optionalLibs.forEach(lib => {
-                    console.log(`${lib.name}: ${lib.check() ? 'Available' : 'Not available'}`);
+                    const available = lib.check();
+                    console.log(`${lib.name}: ${available ? 'Available' : 'Not available'}`);
+
+                    if (lib.name === 'ForceAtlas2' && available) {
+                        const btn = document.getElementById('forceatlas2-btn');
+                        if (btn) btn.style.display = 'inline-block';
+                    }
                 });
 
                 loadGraph();

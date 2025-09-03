@@ -19,7 +19,7 @@ def dump_graph(
         data = nx.node_link_data(G, link="edges")
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     elif format == "gexf":
         nx.write_gexf(G, path)
