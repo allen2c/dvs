@@ -36,7 +36,7 @@ async def extract_relations(
 
     counter_lock = asyncio.Lock()
 
-    async def run_extract_relations(fact: Fact) -> list["Triplet"]:
+    async def run_extract_relations(fact: "Fact") -> list["Triplet"]:
         nonlocal complete_count
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
@@ -47,7 +47,11 @@ async def extract_relations(
         return [
             Triplet(
                 subject=triplet.subject,
-                relation=triplet.relation,  # type: ignore
+                relation=(
+                    triplet.relation
+                    if triplet.relation in ("is_a", "has_a", "related_to", "is_from")
+                    else "related_to"
+                ),
                 object=triplet.object,
                 document_id=fact.document_id,
             )
@@ -87,7 +91,7 @@ async def extract_entities(
     complete_count = 0
     counter_lock = asyncio.Lock()
 
-    async def run_extract_entities(fact: Fact) -> list["Entity"]:
+    async def run_extract_entities(fact: "Fact") -> list["Entity"]:
         nonlocal complete_count
         async with counter_lock:
             current_idx = complete_count = complete_count + 1

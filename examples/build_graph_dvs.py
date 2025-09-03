@@ -51,7 +51,7 @@ dvs_client = dvs.DVS(
 
 openai_client = openai.AsyncOpenAI()
 chat_model = agents.OpenAIResponsesModel(
-    model="gpt-5-nano",
+    model="gpt-4.1-nano",
     openai_client=openai_client,
 )
 emb_model = AsyncOpenAIEmbeddingsModel("text-embedding-3-small", openai_client)
@@ -67,7 +67,7 @@ def load_documents(directory_path: pathlib.Path | str) -> list[Document]:
     )
     if not documents:
         raise ValueError(f"No documents found in {directory_path}")
-    return documents
+    return documents[:1]
 
 
 async def main():

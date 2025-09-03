@@ -16,7 +16,7 @@ def dump_graph(
 
     path = pathlib.Path(path)
     if format == "node_link":
-        data = nx.node_link_data(G)
+        data = nx.node_link_data(G, link="edges")
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(data, f)

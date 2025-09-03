@@ -19,6 +19,7 @@ class Node(pydantic.BaseModel):
         ...,
         description="Kind of the node.",
     )
+    entity: str = ""
 
     @pydantic.model_validator(mode="after")
     def validate_label(self) -> typing.Self:

@@ -30,6 +30,8 @@ async def build_graph_from_documents(
     max_concurrency: int = 1,
     verbose: bool = False,
 ) -> "nx.DiGraph":
+    import networkx as nx
+
     from dvs.types.edge import Edge
     from dvs.types.node import Node
     from dvs.utils.aps import get_facts
@@ -80,56 +82,47 @@ async def build_graph_from_documents(
 
     # Build the Final Knowledge Graph
     G = nx.DiGraph()
-    nodes_map: dict[str, "Node"] = {}  # label -> Node
-    edges_map: dict[tuple[str, str, str], "Edge"] = {}  # from_node, to_node, relation
+    labels_nodes_map: dict[str, "Node"] = {}  # label -> Node
+    labels_edges_map: dict[tuple[str, str, str], "Edge"] = (
+        {}
+    )  # from_node, to_node, relation
 
     # Add entities into graph
     for _entity in extra_entities:
-        _norm_label = canonical_map[_entity.value]  # Must a key
-        _relation = "is_from"
-        if _norm_label not in nodes_map:
-            _node = Node(label=_norm_label, kind="entity")
-            nodes_map[_norm_label] = _node
-            G.add_node(_node.label, **_node.model_dump(exclude={"label"}))
-        if (_norm_label, _entity.document_id, _relation) not in edges_map:
-            _edge = Edge(
-                from_node=_norm_label, to_node=_entity.document_id, relation=_relation
-            )
-            edges_map[(_norm_label, _entity.document_id, _relation)] = _edge
+        _nodes, _edges = _entity.to_nodes_edges(
+            canonical_map=canonical_map,
+            labels_nodes_map=labels_nodes_map,
+            labels_edges_map=labels_edges_map,
+        )
+        for _node in _nodes:
+            G.add_node(_node.node_id, **_node.model_dump())
+        for _edge in _edges:
             G.add_edge(
-                _norm_label,
-                _entity.document_id,
-                **_edge.model_dump(exclude={"from_node", "to_node"}),
+                labels_nodes_map[_edge.from_node].node_id,
+                labels_nodes_map[_edge.to_node].node_id,
+                **_edge.model_dump(),
             )
 
     # Add triplets into graph
-    for triplet in all_triplets:
-        # Normalize subject and object using the complete map
-        subject_norm = canonical_map[triplet.subject]  # Must a key
-        object_norm = canonical_map[triplet.object]  # Must a key
-
-        if subject_norm not in nodes_map:
-            _node = Node(label=subject_norm, kind="entity")
-            nodes_map[subject_norm] = _node
-            G.add_node(_node.label, **_node.model_dump(exclude={"label"}))
-
-        if object_norm not in nodes_map:
-            _node = Node(label=object_norm, kind="entity")
-            nodes_map[object_norm] = _node
-            G.add_node(_node.label, **_node.model_dump(exclude={"label"}))
-
-        if (subject_norm, object_norm, triplet.relation) not in edges_map:
-            _edge = Edge(
-                from_node=subject_norm, to_node=object_norm, relation=triplet.relation
-            )
-            edges_map[(subject_norm, object_norm, triplet.relation)] = _edge
+    for _triplet in all_triplets:
+        _nodes, _edges = _triplet.to_nodes_edges(
+            canonical_map=canonical_map,
+            labels_nodes_map=labels_nodes_map,
+            labels_edges_map=labels_edges_map,
+        )
+        for _node in _nodes:
+            G.add_node(_node.node_id, **_node.model_dump())
+        for _edge in _edges:
             G.add_edge(
-                subject_norm,
-                object_norm,
-                **_edge.model_dump(exclude={"from_node", "to_node"}),
+                labels_nodes_map[_edge.from_node].node_id,
+                labels_nodes_map[_edge.to_node].node_id,
+                **_edge.model_dump(),
             )
 
-        # TODO: Add document node from the triplets
+    if None in labels_nodes_map:
+        raise ValueError("None in labels_nodes_map")
+    if None in labels_edges_map:
+        raise ValueError("None in labels_edges_map")
 
     logger.info("✨ Knowledge Graph Construction Complete! ✨")
     logger.info(f"Total Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
