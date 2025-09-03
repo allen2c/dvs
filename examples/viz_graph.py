@@ -63,7 +63,7 @@ def perform_dbscan_clustering(embeddings_2d: np.ndarray) -> np.ndarray:
     """
     # The choice of `eps` is crucial. A good starting point can be found by
     # analyzing the distance to the k-th nearest neighbor (often k=min_samples).
-    dbscan = DBSCAN(eps=1.5, min_samples=2)  # Smaller eps for tighter clusters
+    dbscan = DBSCAN(eps=2.5, min_samples=2)  # Larger eps for easier clustering
     cluster_labels = dbscan.fit_predict(embeddings_2d)
     return cluster_labels
 

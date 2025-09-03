@@ -18,12 +18,14 @@ from rich.console import Console
 
 import dvs
 from dvs.types.document import Document
+from dvs.types.edge import Edge
+from dvs.types.node import Node
 from dvs.utils.build_graph_from_documents import build_graph_from_documents
 from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
 from dvs.utils.loads_graph import load_graph
 
-VERBOSE = True
+VERBOSE = False
 MAX_CONCURRENCY = 4
 
 lbt.set_logger("dvs")
@@ -65,9 +67,7 @@ ner_agent = NerAgent()
 
 
 def load_documents(directory_path: pathlib.Path | str) -> list[Document]:
-    documents: list[Document] = load_documents_from_directory(
-        data_root.joinpath("demo_documents")
-    )
+    documents: list[Document] = load_documents_from_directory(directory_path)
     if not documents:
         raise ValueError(f"No documents found in {directory_path}")
     return documents
@@ -112,6 +112,19 @@ async def main():
     )
     graph = load_graph(graph_path, format="gexf")
     console.log(f"Built Graph: {graph_path}")
+
+    # --- Step 3.5: Read Graph from file ---
+    console.rule("[bold blue]Step 3.5: Read Graph from file[/bold blue]")
+    graph_path = data_root.joinpath(f"{graph_stem_name}.gexf")
+    graph = load_graph(graph_path, format="gexf")
+    console.log(f"Read Graph: {graph_path}")
+    nodes: list[Node] = [
+        Node.model_validate(node_data) for _, node_data in graph.nodes(data=True)
+    ]
+    edges: list[Edge] = [
+        Edge.model_validate(edge_data) for _, _, edge_data in graph.edges(data=True)
+    ]
+    console.log(f"Nodes: {len(nodes)}, Edges: {len(edges)}")
 
 
 if __name__ == "__main__":
