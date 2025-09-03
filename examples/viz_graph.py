@@ -44,7 +44,7 @@ def reduce_dimensions_tsne(embeddings: np.ndarray) -> np.ndarray:
     # However, for simplicity here, we run t-SNE directly.
     tsne = TSNE(
         n_components=2,
-        perplexity=min(15, embeddings.shape[0])
+        perplexity=min(5, embeddings.shape[0])
         - 1,  # Typical values are between 5 and 50.
         random_state=42,
         init="pca",
@@ -63,7 +63,7 @@ def perform_dbscan_clustering(embeddings_2d: np.ndarray) -> np.ndarray:
     """
     # The choice of `eps` is crucial. A good starting point can be found by
     # analyzing the distance to the k-th nearest neighbor (often k=min_samples).
-    dbscan = DBSCAN(eps=2.5, min_samples=5)
+    dbscan = DBSCAN(eps=1.5, min_samples=2)  # Smaller eps for tighter clusters
     cluster_labels = dbscan.fit_predict(embeddings_2d)
     return cluster_labels
 

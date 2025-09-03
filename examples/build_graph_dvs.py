@@ -88,10 +88,10 @@ async def main():
     # --- Step 2.5: Optional Draw embeddings on 2D plane ---
     console.rule("[bold blue]Step 2.5: Draw embeddings on 2D plane[/bold blue]")
     points = [p for p in dvs_client.db.points.gen(limit=100, with_embedding=True)]
-    label_embeddings: typing.List[typing.Tuple[str, typing.List[float]]] = [
-        (dvs_client.db.documents.retrieve(p.document_id).name, p.to_python())
-        for p in points
-    ]
+    label_embeddings: typing.List[typing.Tuple[str, typing.List[float]]] = []
+    for p in points:
+        doc = dvs_client.db.documents.retrieve(p.document_id)
+        label_embeddings.append((f"{doc.name}:{doc.chunk_index}", p.to_python()))
     label_embeddings_path.write_text(json.dumps(label_embeddings))
 
     # --- Step 3: Build Graph ---
