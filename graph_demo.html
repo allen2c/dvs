@@ -1,0 +1,634 @@
+<!-- npx serve . -->
+<!-- http://localhost:3000 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Visualization with Sigma.js</title>
+    <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.1/dist/graphology.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/build/graphology-layout-forceatlas2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/graphology-layout-force@0.6.1/build/graphology-layout-force.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/graphology-layout@0.17.2/build/graphology-layout.min.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .graph-container {
+            background: white;
+            border-radius: 8px;
+            flex: 1;
+            position: relative;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #graph {
+            width: 100%;
+            height: 100%;
+            border-radius: 8px;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+        }
+
+        .control-group {
+            margin-bottom: 10px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Knowledge Graph Visualization</h1>
+            <p>Interactive graph visualization using Sigma.js</p>
+        </div>
+
+        <div class="graph-container">
+            <div id="graph"></div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label>View Controls</label>
+                    <button onclick="resetCamera()">Reset View</button>
+                    <button onclick="stopLayout()">Stop Layout</button>
+                </div>
+                <div class="control-group">
+                    <label>Layout Algorithms</label>
+                    <button onclick="applyForceAtlas2()">ForceAtlas2</button>
+                    <button onclick="applyForceLayout()">Force</button>
+                    <button onclick="applyCircularLayout()">Circular</button>
+                </div>
+                <div class="control-group">
+                    <label>Node Filters</label>
+                    <button onclick="filterByType('entity')">Entities Only</button>
+                    <button onclick="filterByType('document')">Documents Only</button>
+                    <button onclick="showAll()">Show All</button>
+                </div>
+            </div>
+
+            <div class="info">
+                <div id="node-info">Hover over a node to see details</div>
+            </div>
+
+            <div class="legend">
+                <h4 style="margin-top: 0;">Legend</h4>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #e74c3c;"></div>
+                    <span>Entity</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #3498db;"></div>
+                    <span>Document</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let graph;
+        let renderer;
+        let layoutRunning = false;
+        let layoutWorker = null;
+        let originalData;
+
+        // Color mapping for different node types
+        const nodeColors = {
+            'entity': '#e74c3c',
+            'document': '#3498db'
+        };
+
+        // Entity type colors for more detailed visualization
+        const entityColors = {
+            'PERSON': '#e67e22',
+            'LOCATION': '#27ae60',
+            'DATETIME': '#8e44ad',
+            'PROPER_NOUN': '#f39c12',
+            'NUMERIC': '#16a085',
+            'NORP': '#e91e63',
+            '': '#95a5a6'  // default for empty entity types
+        };
+
+        async function loadGraph() {
+            try {
+                                // Check if libraries are loaded
+                if (typeof graphology === 'undefined') {
+                    throw new Error('Graphology library not loaded');
+                }
+                if (typeof Sigma === 'undefined') {
+                    throw new Error('Sigma.js library not loaded');
+                }
+
+                console.log('Libraries loaded successfully');
+                console.log('Graphology:', typeof graphology);
+                console.log('Sigma:', typeof Sigma);
+                console.log('ForceAtlas2:', typeof graphologyLayoutForceAtlas2);
+                console.log('Force Layout:', typeof graphologyLayoutForce);
+
+                const response = await fetch('data/example_graph_dvs.json');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                originalData = data;
+
+                // Convert the data format to Sigma.js format
+                const sigmaData = convertToSigmaFormat(data);
+
+                // Create the graph
+                graph = new graphology.Graph();
+
+                // Add nodes
+                sigmaData.nodes.forEach(node => {
+                    graph.addNode(node.id, node);
+                });
+
+                // Add edges
+                sigmaData.edges.forEach(edge => {
+                    if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
+                        graph.addEdge(edge.source, edge.target, edge);
+                    }
+                });
+
+                // Apply layout
+                applyLayout();
+
+                // Create renderer
+                renderer = new Sigma(graph, document.getElementById('graph'));
+
+                // Add event listeners
+                setupEventListeners();
+
+                console.log(`Graph loaded successfully: ${graph.nodes().length} nodes, ${graph.edges().length} edges`);
+
+            } catch (error) {
+                console.error('Error loading graph:', error);
+                document.getElementById('graph').innerHTML =
+                    `<div class="error">Error loading graph: ${error.message}</div>`;
+            }
+        }
+
+        function convertToSigmaFormat(data) {
+            const nodes = data.nodes.map((node, index) => {
+                // Determine color based on node kind and entity type
+                let color = nodeColors[node.kind] || '#95a5a6';
+                if (node.kind === 'entity' && node.entity) {
+                    color = entityColors[node.entity] || entityColors[''];
+                }
+
+                return {
+                    id: node.node_id || node.id,
+                    label: node.label,
+                    size: node.kind === 'document' ? 15 : 10,
+                    color: color,
+                    kind: node.kind,
+                    entity: node.entity,
+                    x: 0,
+                    y: 0
+                };
+            });
+
+            const edges = data.edges.map(edge => ({
+                id: edge.edge_id,
+                source: edge.source,
+                target: edge.target,
+                label: edge.relation,
+                color: '#bdc3c7',
+                size: 2
+            }));
+
+            return { nodes, edges };
+        }
+
+                function applyLayout() {
+            // Start with circular layout as default
+            applyCircularLayout();
+        }
+
+        function applyForceAtlas2() {
+            if (!graph || layoutRunning) return;
+
+            stopLayout();
+            console.log('Applying ForceAtlas2 layout...');
+
+            try {
+                layoutRunning = true;
+
+                // ForceAtlas2 settings optimized for complex networks
+                const settings = {
+                    iterations: 100,
+                    settings: {
+                        gravity: 0.5,
+                        scalingRatio: 1.0,
+                        strongGravityMode: false,
+                        barnesHutOptimize: true,
+                        barnesHutTheta: 0.8,
+                        slowDown: 5,
+                        linLogMode: false,
+                        outboundAttractionDistribution: false,
+                        adjustSizes: false,
+                        edgeWeightInfluence: 1.0
+                    }
+                };
+
+                if (typeof graphologyLayoutForceAtlas2 !== 'undefined') {
+                    // Run ForceAtlas2
+                    graphologyLayoutForceAtlas2.assign(graph, settings);
+                    if (renderer) renderer.refresh();
+
+                    console.log('ForceAtlas2 layout applied successfully');
+                } else {
+                    console.warn('ForceAtlas2 not available, using fallback');
+                    applyForceLayout();
+                }
+
+            } catch (error) {
+                console.error('Error applying ForceAtlas2:', error);
+                applyForceLayout(); // Fallback
+            } finally {
+                setTimeout(() => { layoutRunning = false; }, 2000);
+            }
+        }
+
+        function applyForceLayout() {
+            if (!graph || layoutRunning) return;
+
+            stopLayout();
+            console.log('Applying Force layout...');
+
+            try {
+                layoutRunning = true;
+
+                const settings = {
+                    iterations: 50,
+                    attraction: 0.0005,
+                    repulsion: 0.1,
+                    gravity: 0.0001,
+                    inertia: 0.6,
+                    maxMove: 100
+                };
+
+                if (typeof graphologyLayoutForce !== 'undefined') {
+                    graphologyLayoutForce.assign(graph, settings);
+                    if (renderer) renderer.refresh();
+                    console.log('Force layout applied successfully');
+                } else {
+                    // Simple force simulation fallback
+                    applySimpleForceLayout();
+                }
+
+            } catch (error) {
+                console.error('Error applying Force layout:', error);
+                applySimpleForceLayout();
+            } finally {
+                setTimeout(() => { layoutRunning = false; }, 1500);
+            }
+        }
+
+        function applyCircularLayout() {
+            if (!graph) return;
+
+            stopLayout();
+            console.log('Applying Circular layout...');
+
+            const nodes = graph.nodes();
+            const nodeCount = nodes.length;
+            const radius = Math.min(500, Math.max(200, nodeCount * 8));
+
+            // Separate entities and documents for better visualization
+            const entities = [];
+            const documents = [];
+
+            nodes.forEach(node => {
+                const attributes = graph.getNodeAttributes(node);
+                if (attributes.kind === 'document') {
+                    documents.push(node);
+                } else {
+                    entities.push(node);
+                }
+            });
+
+            // Place documents in outer ring
+            documents.forEach((node, index) => {
+                const angle = (index * 2 * Math.PI) / documents.length;
+                const x = Math.cos(angle) * radius;
+                const y = Math.sin(angle) * radius;
+                graph.setNodeAttribute(node, 'x', x);
+                graph.setNodeAttribute(node, 'y', y);
+            });
+
+            // Place entities in inner rings by type
+            const entityTypes = {};
+            entities.forEach(node => {
+                const attributes = graph.getNodeAttributes(node);
+                const type = attributes.entity || 'OTHER';
+                if (!entityTypes[type]) entityTypes[type] = [];
+                entityTypes[type].push(node);
+            });
+
+            let ringIndex = 0;
+            Object.keys(entityTypes).forEach(type => {
+                const typeNodes = entityTypes[type];
+                const typeRadius = radius * (0.3 + (ringIndex * 0.15));
+
+                typeNodes.forEach((node, index) => {
+                    const angle = (index * 2 * Math.PI) / typeNodes.length;
+                    const x = Math.cos(angle) * typeRadius;
+                    const y = Math.sin(angle) * typeRadius;
+                    graph.setNodeAttribute(node, 'x', x);
+                    graph.setNodeAttribute(node, 'y', y);
+                });
+
+                ringIndex++;
+            });
+
+            if (renderer) renderer.refresh();
+            console.log('Circular layout applied successfully');
+        }
+
+        function applySimpleForceLayout() {
+            // Simple force-directed layout implementation
+            const nodes = graph.nodes();
+            const edges = graph.edges();
+
+            // Initialize random positions if not set
+            nodes.forEach(node => {
+                if (!graph.hasNodeAttribute(node, 'x')) {
+                    graph.setNodeAttribute(node, 'x', (Math.random() - 0.5) * 1000);
+                }
+                if (!graph.hasNodeAttribute(node, 'y')) {
+                    graph.setNodeAttribute(node, 'y', (Math.random() - 0.5) * 1000);
+                }
+            });
+
+            // Run simulation
+            for (let iteration = 0; iteration < 100; iteration++) {
+                const forces = {};
+
+                // Initialize forces
+                nodes.forEach(node => {
+                    forces[node] = { x: 0, y: 0 };
+                });
+
+                // Repulsion between all nodes
+                nodes.forEach((node1, i) => {
+                    nodes.slice(i + 1).forEach(node2 => {
+                        const pos1 = {
+                            x: graph.getNodeAttribute(node1, 'x'),
+                            y: graph.getNodeAttribute(node1, 'y')
+                        };
+                        const pos2 = {
+                            x: graph.getNodeAttribute(node2, 'x'),
+                            y: graph.getNodeAttribute(node2, 'y')
+                        };
+
+                        const dx = pos1.x - pos2.x;
+                        const dy = pos1.y - pos2.y;
+                        const distance = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+                        const force = 10000 / (distance * distance);
+
+                        forces[node1].x += (dx / distance) * force;
+                        forces[node1].y += (dy / distance) * force;
+                        forces[node2].x -= (dx / distance) * force;
+                        forces[node2].y -= (dy / distance) * force;
+                    });
+                });
+
+                // Attraction along edges
+                edges.forEach(edge => {
+                    const [source, target] = graph.extremities(edge);
+                    const pos1 = {
+                        x: graph.getNodeAttribute(source, 'x'),
+                        y: graph.getNodeAttribute(source, 'y')
+                    };
+                    const pos2 = {
+                        x: graph.getNodeAttribute(target, 'x'),
+                        y: graph.getNodeAttribute(target, 'y')
+                    };
+
+                    const dx = pos2.x - pos1.x;
+                    const dy = pos2.y - pos1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const force = distance * 0.01;
+
+                    forces[source].x += (dx / distance) * force;
+                    forces[source].y += (dy / distance) * force;
+                    forces[target].x -= (dx / distance) * force;
+                    forces[target].y -= (dy / distance) * force;
+                });
+
+                // Apply forces with damping
+                nodes.forEach(node => {
+                    const currentX = graph.getNodeAttribute(node, 'x');
+                    const currentY = graph.getNodeAttribute(node, 'y');
+                    const dampening = 0.8;
+
+                    graph.setNodeAttribute(node, 'x', currentX + forces[node].x * dampening);
+                    graph.setNodeAttribute(node, 'y', currentY + forces[node].y * dampening);
+                });
+            }
+
+            if (renderer) renderer.refresh();
+            console.log('Simple force layout applied successfully');
+        }
+
+        function stopLayout() {
+            if (layoutWorker) {
+                layoutWorker.kill();
+                layoutWorker = null;
+            }
+            layoutRunning = false;
+            console.log('Layout stopped');
+        }
+
+        function setupEventListeners() {
+            // Node hover events
+            renderer.on('enterNode', (event) => {
+                const node = graph.getNodeAttributes(event.node);
+                const nodeInfo = document.getElementById('node-info');
+                nodeInfo.innerHTML = `
+                    <strong>${node.label}</strong><br>
+                    Type: ${node.kind}<br>
+                    ${node.entity ? `Entity: ${node.entity}<br>` : ''}
+                    ID: ${event.node}
+                `;
+            });
+
+            renderer.on('leaveNode', () => {
+                document.getElementById('node-info').innerHTML = 'Hover over a node to see details';
+            });
+
+            // Click events
+            renderer.on('clickNode', (event) => {
+                console.log('Clicked node:', event.node, graph.getNodeAttributes(event.node));
+            });
+        }
+
+        function resetCamera() {
+            if (renderer) {
+                renderer.getCamera().animate({
+                    x: 0,
+                    y: 0,
+                    ratio: 1
+                }, {
+                    duration: 500
+                });
+            }
+        }
+
+
+
+        function filterByType(type) {
+            if (!graph || !renderer) return;
+
+            graph.forEachNode((node, attributes) => {
+                if (attributes.kind === type) {
+                    graph.setNodeAttribute(node, 'hidden', false);
+                } else {
+                    graph.setNodeAttribute(node, 'hidden', true);
+                }
+            });
+
+            renderer.refresh();
+        }
+
+        function showAll() {
+            if (!graph || !renderer) return;
+
+            graph.forEachNode((node) => {
+                graph.setNodeAttribute(node, 'hidden', false);
+            });
+
+            renderer.refresh();
+        }
+
+        // Wait for all libraries to load, then initialize the graph
+        function initializeWhenReady() {
+            const requiredLibs = [
+                { name: 'graphology', check: () => typeof graphology !== 'undefined' },
+                { name: 'Sigma', check: () => typeof Sigma !== 'undefined' }
+            ];
+
+            const optionalLibs = [
+                { name: 'ForceAtlas2', check: () => typeof graphologyLayoutForceAtlas2 !== 'undefined' },
+                { name: 'Force Layout', check: () => typeof graphologyLayoutForce !== 'undefined' }
+            ];
+
+            const requiredLoaded = requiredLibs.every(lib => lib.check());
+
+            if (requiredLoaded) {
+                console.log('Required libraries loaded, initializing graph...');
+
+                // Log optional library status
+                optionalLibs.forEach(lib => {
+                    console.log(`${lib.name}: ${lib.check() ? 'Available' : 'Not available'}`);
+                });
+
+                loadGraph();
+            } else {
+                const missing = requiredLibs.filter(lib => !lib.check()).map(lib => lib.name);
+                console.log(`Waiting for libraries to load... Missing: ${missing.join(', ')}`);
+                setTimeout(initializeWhenReady, 100);
+            }
+        }
+
+        // Load the graph when the page loads
+        window.addEventListener('load', () => {
+            setTimeout(initializeWhenReady, 100); // Small delay to ensure scripts are fully loaded
+        });
+    </script>
+</body>
+</html>

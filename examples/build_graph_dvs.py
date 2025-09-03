@@ -1,5 +1,7 @@
 import asyncio
+import json
 import pathlib
+import typing
 
 import agents
 import diskcache
@@ -32,6 +34,7 @@ data_root = pathlib.Path(__file__).parent.parent.joinpath("data")
 documents_dir = data_root.joinpath("demo_documents")
 duckdb_path = data_root.joinpath("example_graph_dvs.duckdb")
 graph_stem_name = "example_graph_dvs"
+label_embeddings_path = data_root.joinpath("label_embeddings.json")
 
 if duckdb_path.is_file():
     duckdb_path.unlink()
@@ -81,6 +84,15 @@ async def main():
     console.rule("[bold blue]Step 2: Build DVS[/bold blue]")
     created_result = dvs_client.add(documents, verbose=VERBOSE)
     console.log(f"Created DVS result: {created_result}")
+
+    # --- Step 2.5: Optional Draw embeddings on 2D plane ---
+    console.rule("[bold blue]Step 2.5: Draw embeddings on 2D plane[/bold blue]")
+    points = [p for p in dvs_client.db.points.gen(limit=100, with_embedding=True)]
+    label_embeddings: typing.List[typing.Tuple[str, typing.List[float]]] = [
+        (dvs_client.db.documents.retrieve(p.document_id).name, p.to_python())
+        for p in points
+    ]
+    label_embeddings_path.write_text(json.dumps(label_embeddings))
 
     # --- Step 3: Build Graph ---
     console.rule("[bold blue]Step 3: Build Graph[/bold blue]")
