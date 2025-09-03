@@ -70,7 +70,7 @@ def load_documents(directory_path: pathlib.Path | str) -> list[Document]:
     )
     if not documents:
         raise ValueError(f"No documents found in {directory_path}")
-    return documents[:1]
+    return documents
 
 
 async def main():
