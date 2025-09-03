@@ -8,6 +8,7 @@ from dvs.utils.sql_stmts import SQL_STMT_INSTALL_EXTENSIONS, SQL_STMT_SHOW_TABLE
 
 if typing.TYPE_CHECKING:
     from dvs.db.documents.api import Documents
+    from dvs.db.graph.api import Graph
     from dvs.db.manifest.api import Manifest
     from dvs.db.points.api import Points
 
@@ -16,7 +17,7 @@ class DB:
     def __init__(self, dvs: dvs.DVS):
         self.dvs = dvs
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(self, *, enable_graph: bool = False, verbose: bool | None = None) -> bool:
         """
         Initialize the DuckDB database tables required for vector similarity search.
         Creates manifest, documents, and points tables with proper schemas and indexes.
@@ -28,6 +29,8 @@ class DB:
             raise ValueError("Failed to touch the documents table")
         if not self.points.touch(verbose=verbose):
             raise ValueError("Failed to touch the points table")
+        if enable_graph and not self.graph.touch(verbose=verbose):
+            raise ValueError("Failed to touch the graph table")
         return True
 
     def install_extensions(self, *, verbose: bool | None = None) -> bool:
@@ -81,3 +84,12 @@ class DB:
         from dvs.db.points.api import Points
 
         return Points(self.dvs)
+
+    @functools.cached_property
+    def graph(self) -> "Graph":
+        """
+        Access the graph table API for managing graph data.
+        """
+        from dvs.db.graph.api import Graph
+
+        return Graph(self.dvs)

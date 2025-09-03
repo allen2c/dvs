@@ -69,6 +69,8 @@ SQL_STMT_INSTALL_EXTENSIONS: Final[Text] = dedent(
     LOAD vss;
     INSTALL json;
     LOAD json;
+    INSTALL duckpgq FROM community;
+    LOAD duckpgq;
     """
 ).strip()
 

@@ -33,12 +33,14 @@ class DVS:
         *,
         model_settings: oai_emb_model.ModelSettings | None = None,
         model: oai_emb_model.OpenAIEmbeddingsModel | str,
+        enable_graph: bool = False,
         verbose: bool | None = None,
     ):
         self.settings = self._ensure_dvs_settings(settings)
         self.verbose = verbose or False
         self.model = self._ensure_model(model)
         self.model_settings = model_settings or oai_emb_model.ModelSettings()
+        self.enable_graph = enable_graph
 
         # Attributes
         self._conn: duckdb.DuckDBPyConnection | None = None
@@ -48,7 +50,7 @@ class DVS:
             self.model, self.model_settings, verbose=self.verbose
         )
 
-        self.db.touch(verbose=self.verbose)
+        self.db.touch(enable_graph=self.enable_graph, verbose=self.verbose)
 
     @property
     def duckdb_path(self) -> pathlib.Path:
