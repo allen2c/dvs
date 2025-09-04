@@ -8,7 +8,7 @@ import dvs
 import dvs.utils.openapi as openapi_utils
 from dvs.types.manifest import Manifest as ManifestType
 from dvs.utils.debug_print import debug_print
-from dvs.utils.display import DISPLAY_SQL_PARAMS, DISPLAY_SQL_QUERY
+from dvs.utils.display import DISPLAY_SQL_PARAMS
 from dvs.utils.timer import Timer
 
 logger = logging.getLogger(__name__)
@@ -93,23 +93,28 @@ class Manifest:
         Internal method to create the manifest table if it does not exist.
         Handles table creation SQL generation and execution.
         """
-        create_table_sql = openapi_utils.openapi_to_create_table_sql(
-            ManifestType.model_json_schema(), table_name=dvs.DVS_MANIFEST_TABLE_NAME
-        ).strip()
+
+        with Timer() as timer:
+            create_table_sql = openapi_utils.openapi_to_create_table_sql(
+                ManifestType.model_json_schema(), table_name=dvs.DVS_MANIFEST_TABLE_NAME
+            ).strip()
+
+            try:
+                self.dvs.conn.sql(create_table_sql)
+            except duckdb.CatalogException as e:
+                if "already exists" in str(e).lower():
+                    logger.debug(
+                        f"Table '{dvs.DVS_MANIFEST_TABLE_NAME}' already exists"
+                    )
+                else:
+                    raise e
 
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
+            f"{create_table_sql}",
             title=f"Creating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        try:
-            self.dvs.conn.sql(create_table_sql)
-        except duckdb.CatalogException as e:
-            if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.DVS_MANIFEST_TABLE_NAME}' already exists")
-            else:
-                raise e
 
         return True
 
@@ -123,13 +128,15 @@ class Manifest:
 
         query = f"SELECT {columns_expr} FROM {dvs.DVS_MANIFEST_TABLE_NAME}"
 
+        with Timer() as timer:
+            result = self.dvs.conn.execute(query).fetchone()
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            f"{query}",
             title="Retrieving manifest with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        result = self.dvs.conn.execute(query).fetchone()
 
         if result is None:
             return None
@@ -158,14 +165,15 @@ class Manifest:
             + f"VALUES ({placeholders})"
         )
 
+        with Timer() as timer:
+            self.dvs.conn.executemany(query, parameters)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Creating manifest with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        self.dvs.conn.executemany(query, parameters)
 
         return manifest
 
@@ -175,10 +183,12 @@ class Manifest:
         """
         query = f"DROP TABLE IF EXISTS {dvs.DVS_MANIFEST_TABLE_NAME}"
 
+        with Timer() as timer:
+            self.dvs.conn.execute(query)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            f"{query}",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             title=f"Dropping table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
             verbose=verbose,
         )
-
-        self.dvs.conn.execute(query)

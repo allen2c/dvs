@@ -12,11 +12,7 @@ import dvs.utils.openapi as openapi_utils
 from dvs.types.document import Document as DocumentType
 from dvs.types.paginations import Pagination
 from dvs.utils.debug_print import debug_print
-from dvs.utils.display import (
-    DISPLAY_SQL_PARAMS,
-    DISPLAY_SQL_QUERY,
-    display_sql_parameters,
-)
+from dvs.utils.display import DISPLAY_SQL_PARAMS, display_sql_parameters
 from dvs.utils.dummies import dummy_httpx_response
 from dvs.utils.sql_stmts import SQL_STMT_DROP_TABLE
 from dvs.utils.timer import Timer
@@ -271,28 +267,33 @@ class Documents:
         # Install JSON and VSS extensions
         self.dvs.db.install_extensions(verbose=verbose)
 
-        # Create table
-        create_table_sql = openapi_utils.openapi_to_create_table_sql(
-            DocumentType.model_json_schema(),
-            table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
-            primary_key="document_id",
-            unique_fields=[],
-            # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
-            indexes=["content_md5", "source_id"],
-        )
+        with Timer() as timer:
+            # Create table
+            create_table_sql = openapi_utils.openapi_to_create_table_sql(
+                DocumentType.model_json_schema(),
+                table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
+                primary_key="document_id",
+                unique_fields=[],
+                # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
+                indexes=["content_md5", "source_id"],
+            )
+
+            try:
+                self.dvs.conn.sql(create_table_sql)
+            except duckdb.CatalogException as e:
+                if "already exists" in str(e).lower():
+                    logger.debug(
+                        f"Table '{dvs.DVS_DOCUMENTS_TABLE_NAME}' already exists"
+                    )
+                else:
+                    raise e
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
+            create_table_sql,
             title=f"Creating table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        try:
-            self.dvs.conn.sql(create_table_sql)
-        except duckdb.CatalogException as e:
-            if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.DVS_DOCUMENTS_TABLE_NAME}' already exists")
-            else:
-                raise e
 
         return True
 
@@ -314,21 +315,22 @@ class Documents:
         )
         parameters = [document_id]
 
+        with Timer() as timer:
+            result = self.dvs.conn.execute(query, parameters).fetchone()
+
+            if result is None:
+                raise NotFoundError(
+                    f"Document with ID '{document_id}' not found.",
+                    response=dummy_httpx_response(404, b"Not Found"),
+                    body=None,
+                )
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title=f"Retrieving document: '{document_id}' with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        result = self.dvs.conn.execute(query, parameters).fetchone()
-
-        if result is None:
-            raise NotFoundError(
-                f"Document with ID '{document_id}' not found.",
-                response=dummy_httpx_response(404, b"Not Found"),
-                body=None,
-            )
 
         data = dict(zip(columns, result))
         data["metadata"] = json.loads(data["metadata"])
@@ -361,16 +363,16 @@ class Documents:
             + f"VALUES ({placeholders})"
         )
 
+        with Timer() as timer:
+            # Create documents
+            self.dvs.conn.executemany(query, parameters)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
             title="Creating documents with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        # Create documents
-        self.dvs.conn.executemany(query, parameters)
-
         return list(documents)
 
     def _remove(self, document_id: typing.Text, *, verbose: bool | None) -> None:
@@ -380,15 +382,17 @@ class Documents:
         # Prepare delete query
         query = f"DELETE FROM {dvs.DVS_DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
         parameters = [document_id]
+
+        with Timer() as timer:
+            # Delete document
+            self.dvs.conn.execute(query, parameters)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Deleting document with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        # Delete document
-        self.dvs.conn.execute(query, parameters)
 
         return None
 
@@ -437,14 +441,16 @@ class Documents:
         fetch_limit = limit + 1
         query += f"LIMIT {fetch_limit}"
 
+        with Timer() as timer:
+            results = self.dvs.conn.execute(query, parameters).fetchall()
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Listing documents with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
 
-        results = self.dvs.conn.execute(query, parameters).fetchall()
         results = [
             {
                 column: (json.loads(value) if column == "metadata" else value)
@@ -491,14 +497,16 @@ class Documents:
         if where_clauses:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
+        with Timer() as timer:
+            result = self.dvs.conn.execute(query, parameters).fetchone()
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Counting documents with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
 
-        result = self.dvs.conn.execute(query, parameters).fetchone()
         count = result[0] if result else 0
 
         return count
@@ -510,13 +518,15 @@ class Documents:
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
         query = query_template.render(table_name=dvs.DVS_DOCUMENTS_TABLE_NAME)
 
+        with Timer() as timer:
+            # Drop table
+            self.dvs.conn.sql(query)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            f"{query}",
             title=f"Dropping table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        # Drop table
-        self.dvs.conn.sql(query)
 
         return None

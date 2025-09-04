@@ -14,11 +14,7 @@ from dvs.types.paginations import Pagination
 from dvs.types.point import Point as PointType
 from dvs.utils.chunk import chunks
 from dvs.utils.debug_print import debug_print
-from dvs.utils.display import (
-    DISPLAY_SQL_PARAMS,
-    DISPLAY_SQL_QUERY,
-    display_sql_parameters,
-)
+from dvs.utils.display import DISPLAY_SQL_PARAMS, display_sql_parameters
 from dvs.utils.dummies import dummy_httpx_response
 from dvs.utils.ensure import ensure_dict
 from dvs.utils.sql_stmts import (
@@ -359,42 +355,44 @@ class Points:
         self.dvs.db.install_extensions(verbose=verbose)
 
         # Create table
-        create_table_sql = openapi_utils.openapi_to_create_table_sql(
-            PointType.model_json_schema(),
-            table_name=dvs.DVS_POINTS_TABLE_NAME,
-            primary_key="point_id",
-            indexes=["document_id", "content_md5"],
-            custom_sql_types={
-                "embedding": f"FLOAT[{self.dvs.db_manifest.embedding_dimensions}]"
-            },
-        ).strip()
-        create_table_sql = (
-            SQL_STMT_INSTALL_EXTENSIONS
-            + f"\n{create_table_sql}\n"
-            #
-            + f"\n{SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE}\n"
-            # Required for HNSW index
-            #
-            + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
+        with Timer() as timer:
+            create_table_sql = openapi_utils.openapi_to_create_table_sql(
+                PointType.model_json_schema(),
                 table_name=dvs.DVS_POINTS_TABLE_NAME,
-                column_name="embedding",
-                metric="cosine",
-            )
-        ).strip()
+                primary_key="point_id",
+                indexes=["document_id", "content_md5"],
+                custom_sql_types={
+                    "embedding": f"FLOAT[{self.dvs.db_manifest.embedding_dimensions}]"
+                },
+            ).strip()
+            create_table_sql = (
+                SQL_STMT_INSTALL_EXTENSIONS
+                + f"\n{create_table_sql}\n"
+                #
+                + f"\n{SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE}\n"
+                # Required for HNSW index
+                #
+                + SQL_STMT_CREATE_EMBEDDING_INDEX.format(
+                    table_name=dvs.DVS_POINTS_TABLE_NAME,
+                    column_name="embedding",
+                    metric="cosine",
+                )
+            ).strip()
+
+            try:
+                self.dvs.conn.sql(create_table_sql)
+            except duckdb.CatalogException as e:
+                if "already exists" in str(e).lower():
+                    logger.debug(f"Table '{dvs.DVS_POINTS_TABLE_NAME}' already exists")
+                else:
+                    raise e
 
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
+            f"{create_table_sql}",
             title=f"Creating table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        try:
-            self.dvs.conn.sql(create_table_sql)
-        except duckdb.CatalogException as e:
-            if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.DVS_POINTS_TABLE_NAME}' already exists")
-            else:
-                raise e
 
         return True
 
@@ -417,14 +415,15 @@ class Points:
         query = f"SELECT {columns_expr} FROM {dvs.DVS_POINTS_TABLE_NAME} WHERE point_id = ?"  # noqa: E501
         parameters = [point_id]
 
+        with Timer() as timer:
+            result = self.dvs.conn.execute(query, parameters).fetchone()
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Retrieving point with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        result = self.dvs.conn.execute(query, parameters).fetchone()
 
         if result is None:
             raise openai.NotFoundError(
@@ -476,37 +475,35 @@ class Points:
             if verbose and len(points) > batch_size
             else chunks(points, batch_size=batch_size)
         )
-        _shown_debug = False
-        for _batch_pts in _iter_batch_pts:
-            parameters: typing.List[typing.Tuple[typing.Any, ...]] = []
-            for pt in _batch_pts:
-                parameters.append(
-                    tuple(
-                        [
-                            getattr(pt, c) if c != "embedding" else pt.to_python()
-                            for c in columns
-                        ]
+
+        with Timer() as timer:
+            for _batch_pts in _iter_batch_pts:
+                parameters: typing.List[typing.Tuple[typing.Any, ...]] = []
+                for pt in _batch_pts:
+                    parameters.append(
+                        tuple(
+                            [
+                                getattr(pt, c) if c != "embedding" else pt.to_python()
+                                for c in columns
+                            ]
+                        )
                     )
+
+                query = (
+                    f"INSERT INTO {dvs.DVS_POINTS_TABLE_NAME} ({columns_expr}) "
+                    + f"VALUES ({placeholders})"
                 )
+                query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
 
-            query = (
-                f"INSERT INTO {dvs.DVS_POINTS_TABLE_NAME} ({columns_expr}) "
-                + f"VALUES ({placeholders})"
-            )
-            query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
+                # Create points
+                self.dvs.conn.executemany(query, parameters)
 
-            if not _shown_debug:
-                _display_params = display_sql_parameters(parameters)
-                debug_print(
-                    f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                    + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}",
-                    title="Creating points with SQL:",
-                    verbose=verbose,
-                )
-                _shown_debug = True
-
-            # Create points
-            self.dvs.conn.executemany(query, parameters)
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
+            title="Creating points with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=verbose,
+        )
 
         return list(points)
 
@@ -521,14 +518,15 @@ class Points:
         )
         parameters = [point_id]
 
+        with Timer() as timer:
+            self.dvs.conn.execute(query, parameters)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Deleting point with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        self.dvs.conn.execute(query, parameters)
 
         return None
 
@@ -578,20 +576,21 @@ class Points:
         fetch_limit = limit + 1
         query += f"LIMIT {fetch_limit}"
 
+        with Timer() as timer:
+            results: typing.List[typing.Dict] = [
+                {
+                    column: json.loads(value) if column == "metadata" else value
+                    for column, value in zip(columns, row)
+                }
+                for row in self.dvs.conn.execute(query, parameters).fetchall()
+            ]
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Listing points with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        results: typing.List[typing.Dict] = [
-            {
-                column: json.loads(value) if column == "metadata" else value
-                for column, value in zip(columns, row)
-            }
-            for row in self.dvs.conn.execute(query, parameters).fetchall()
-        ]
 
         points = [PointType.model_validate(row) for row in results[:limit]]
 
@@ -631,14 +630,16 @@ class Points:
         if where_clauses:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
+        with Timer() as timer:
+            result = self.dvs.conn.execute(query, parameters).fetchone()
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Counting points with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
 
-        result = self.dvs.conn.execute(query, parameters).fetchone()
         count = result[0] if result else 0
 
         return count
@@ -650,14 +651,16 @@ class Points:
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
         query = query_template.render(table_name=dvs.DVS_POINTS_TABLE_NAME)
 
+        # Drop table
+        with Timer() as timer:
+            self.dvs.conn.sql(query)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}",
+            f"{query}",
             title=f"Dropping table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        # Drop table
-        self.dvs.conn.sql(query)
 
         return None
 
@@ -676,15 +679,16 @@ class Points:
         query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
         parameters = [document_id, content_md5]
 
+        # Remove outdated points
+        with Timer() as timer:
+            self.dvs.conn.execute(query, parameters)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Removing outdated points with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        # Remove outdated points
-        self.dvs.conn.execute(query, parameters)
 
         return None
 
@@ -725,13 +729,15 @@ class Points:
         if where_clauses:
             query += "WHERE " + " OR ".join(where_clauses) + "\n"
 
+        # Remove points
+        with Timer() as timer:
+            self.dvs.conn.execute(query, parameters)
+
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            f"{query}\n" + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Removing points with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        self.dvs.conn.execute(query, parameters)
 
         return None

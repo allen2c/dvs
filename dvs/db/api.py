@@ -3,7 +3,6 @@ import typing
 
 import dvs
 from dvs.utils.debug_print import debug_print
-from dvs.utils.display import DISPLAY_SQL_QUERY
 from dvs.utils.sql_stmts import SQL_STMT_INSTALL_EXTENSIONS, SQL_STMT_SHOW_TABLES
 
 if typing.TYPE_CHECKING:
@@ -40,7 +39,7 @@ class DB:
         verbose = self.dvs.verbose if verbose is None else verbose
 
         debug_print(
-            f"{DISPLAY_SQL_QUERY.format(sql=SQL_STMT_INSTALL_EXTENSIONS)}",
+            SQL_STMT_INSTALL_EXTENSIONS,
             title="Installing extensions with SQL",
             verbose=verbose,
         )
