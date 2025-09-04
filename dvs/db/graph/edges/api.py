@@ -114,6 +114,7 @@ class Edges:
 
         # Create nodes
         with Timer() as timer:
+            logger.debug(f"🔨 Creating {len(edges)} edges ...")
             self.dvs.conn.executemany(query, parameters)
 
         debug_print(
@@ -122,6 +123,7 @@ class Edges:
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
+        logger.info(f"✅ Created {len(edges)} edges.")
         return list(edges)
 
     def list(

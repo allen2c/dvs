@@ -113,6 +113,7 @@ class Nodes:
 
         # Create nodes
         with Timer() as timer:
+            logger.debug(f"🔨 Creating {len(nodes)} nodes ...")
             self.dvs.conn.executemany(query, parameters)
 
         debug_print(
@@ -121,6 +122,7 @@ class Nodes:
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
+        logger.info(f"✅ Created {len(nodes)} nodes.")
         return list(nodes)
 
     def list(
