@@ -1,7 +1,9 @@
 from ._dvs import DVS
 from .config import (
     DVS_DOCUMENTS_TABLE_NAME,
+    DVS_EDGES_TABLE_NAME,
     DVS_MANIFEST_TABLE_NAME,
+    DVS_NODES_TABLE_NAME,
     DVS_POINTS_TABLE_NAME,
     Settings,
 )
@@ -14,7 +16,9 @@ __version__ = VERSION
 __all__ = [
     "Document",
     "DVS_DOCUMENTS_TABLE_NAME",
+    "DVS_EDGES_TABLE_NAME",
     "DVS_MANIFEST_TABLE_NAME",
+    "DVS_NODES_TABLE_NAME",
     "DVS_POINTS_TABLE_NAME",
     "DVS",
     "Point",

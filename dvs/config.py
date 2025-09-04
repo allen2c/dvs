@@ -13,6 +13,8 @@ if typing.TYPE_CHECKING:
 DVS_MANIFEST_TABLE_NAME = "manifest"
 DVS_POINTS_TABLE_NAME = "points"
 DVS_DOCUMENTS_TABLE_NAME = "documents"
+DVS_NODES_TABLE_NAME = "nodes"
+DVS_EDGES_TABLE_NAME = "edges"
 
 CACHE_DIR = pathlib.Path("./cache/dvs")
 TEMP_DIR = CACHE_DIR.joinpath("tmp")

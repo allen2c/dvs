@@ -11,6 +11,7 @@ def debug_print(
     text: typing.Any,
     *,
     title: str = "Debug Print",
+    footer: str = "",
     console: rich.console.Console | None = None,
     verbose: bool | None = False,
     rich_color: RichColorsBase | str | None = None,
@@ -23,8 +24,10 @@ def debug_print(
     if rich_color is None:
         rich_color = RichColorRotator().pick()
 
-    table = rich.table.Table(box=rich.box.HORIZONTALS, width=width)
-    table.add_column(title)
+    table = rich.table.Table(
+        box=rich.box.HORIZONTALS, width=width, show_footer=True if footer else False
+    )
+    table.add_column(title, footer=footer)
     table.add_row(rich.text.Text(str(text)[:4000]))
     console.print(table, style=rich_color)
 

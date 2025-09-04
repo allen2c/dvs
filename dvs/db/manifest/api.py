@@ -99,7 +99,7 @@ class Manifest:
 
         debug_print(
             f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}",
-            title="Creating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
+            title=f"Creating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
             verbose=verbose,
         )
 
