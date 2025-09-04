@@ -5,13 +5,22 @@ from str_or_none import str_or_none
 
 import dvs.utils.ids
 
+RelationIsA: typing.Literal["is_a"] = "is_a"
+RelationHasA: typing.Literal["has_a"] = "has_a"
+RelationRelatedTo: typing.Literal["related_to"] = "related_to"
+RelationIsFrom: typing.Literal["is_from"] = "is_from"
+
+RelationType: typing.TypeAlias = typing.Literal[
+    "is_a", "has_a", "related_to", "is_from"
+]
+
 
 class Edge(pydantic.BaseModel):
     edge_id: str = pydantic.Field(
         default_factory=lambda: dvs.utils.ids.get_id("e"),
         description="Unique identifier for the edge.",
     )
-    relation: typing.Literal["is_a", "has_a", "related_to", "is_from"] = pydantic.Field(
+    relation: RelationType = pydantic.Field(
         ...,
         description="Relation of the edge.",
     )

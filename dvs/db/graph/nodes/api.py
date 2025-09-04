@@ -79,9 +79,9 @@ class Nodes:
             )
 
         data = dict(zip(self.columns, result))
-        manifest = NodeType.model_validate(data)
+        node = NodeType.model_validate(data)
 
-        return manifest
+        return node
 
     def create(
         self,
