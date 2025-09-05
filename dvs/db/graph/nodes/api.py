@@ -1,6 +1,7 @@
 # dvs/db/graph/nodes/api.py
 import functools
 import logging
+import textwrap
 import typing
 
 import duckdb
@@ -59,11 +60,14 @@ class Nodes:
     def retrieve(
         self, node_id: typing.Text, *, verbose: bool | None = None
     ) -> NodeType:
-        query = f"""
+        query = textwrap.dedent(
+            f"""
             SELECT {self.columns_expr}
             FROM {dvs.DVS_NODES_TABLE_NAME}
             WHERE node_id = ?
-        """
+            """
+        ).strip()
+
         parameters = [node_id]
 
         with Timer() as timer:
@@ -96,9 +100,12 @@ class Nodes:
     def retrieve_by_label(
         self, label: typing.Text, *, verbose: bool | None = None
     ) -> NodeType:
-        query = f"""
+        query = textwrap.dedent(
+            f"""
             SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME} WHERE label = ?
-        """
+            """  # noqa: E501
+        ).strip()
+
         parameters = [label]
 
         with Timer() as timer:

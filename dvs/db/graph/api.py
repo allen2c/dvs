@@ -191,13 +191,6 @@ class Graph:
         def run_query(
             query: str,
         ) -> typing.List[typing.Tuple[NodeType, NodeType, int]]:
-            print()
-            print()
-            print()
-            print(query)
-            print()
-            print()
-            print()
             local_conn = conn.cursor()
             result = local_conn.execute(query)
             result_data = result.df().to_dict(orient="records")
@@ -247,6 +240,189 @@ class Graph:
         debug_print(
             "\n\n---\n\n".join(queries),
             title="Getting shortest paths with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return output
+
+    def local_clustering_coefficient(
+        self,
+        *,
+        relation: RelationType,
+        limit: int = 10,
+        verbose: bool | None = None,
+    ) -> typing.List[typing.Tuple[typing.Text, float]]:
+        """
+        Calculate local clustering coefficient for nodes in the graph.
+
+        The local clustering coefficient measures how connected a node's
+        neighbors are to each other. A higher coefficient indicates a more
+        tightly connected neighborhood.
+
+        Args:
+            relation: Specific relation type to analyze.
+            limit: Maximum number of results to return.
+            verbose: Whether to print debug information.
+
+        Returns:
+            List of tuples containing (node, clustering_coefficient) sorted
+                by coefficient descending.
+        """
+        output: typing.List[typing.Tuple[typing.Text, float]] = []
+
+        conn = self.dvs.new_connection()
+        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+
+        with Timer() as timer:
+            query = textwrap.dedent(
+                f"""
+                FROM local_clustering_coefficient(
+                    {dvs.DVS_GRAPH_TABLE_NAME},
+                    {dvs.DVS_NODES_TABLE_NAME},
+                    {relation}
+                )
+                ORDER BY local_clustering_coefficient DESC
+                LIMIT {limit}
+                """  # noqa: E501
+            ).strip()
+
+            local_conn = conn.cursor()
+            result = local_conn.execute(query)
+            result_data = result.df().to_dict(orient="records")
+
+            output = [
+                (
+                    row["node_id"],
+                    float(row["local_clustering_coefficient"]),
+                )
+                for row in result_data
+            ]
+
+        debug_print(
+            query,
+            title="Local Clustering Coefficient Analysis:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return output
+
+    def weakly_connected_component(
+        self,
+        *,
+        relation: RelationType,
+        limit: int = 15,
+        verbose: bool | None = None,
+    ) -> typing.List[typing.Tuple[typing.Text, int]]:
+        """
+        Find weakly connected components in the graph.
+
+        Weakly connected components identify groups of nodes that are connected
+        when considering undirected edges (ignoring direction).
+
+        Args:
+            relation: Specific relation type to analyze.
+            limit: Maximum number of results to return.
+            verbose: Whether to print debug information.
+
+        Returns:
+            List of tuples containing (node, component_id) ordered by
+                component_id.
+        """
+        output: typing.List[typing.Tuple[typing.Text, int]] = []
+
+        conn = self.dvs.new_connection()
+        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+
+        with Timer() as timer:
+            query = textwrap.dedent(
+                f"""
+                FROM weakly_connected_component(
+                    {dvs.DVS_GRAPH_TABLE_NAME},
+                    {dvs.DVS_NODES_TABLE_NAME},
+                    {relation}
+                )
+                ORDER BY componentId, node_id
+                LIMIT {limit}
+                """  # noqa: E501
+            ).strip()
+
+            local_conn = conn.cursor()
+            result = local_conn.execute(query)
+            result_data = result.df().to_dict(orient="records")
+
+            output = [
+                (
+                    row["node_id"],
+                    int(row["componentId"]),
+                )
+                for row in result_data
+            ]
+
+        debug_print(
+            query,
+            title="Weakly Connected Components Analysis:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return output
+
+    def pagerank(
+        self,
+        *,
+        relation: RelationType,
+        limit: int = 10,
+        verbose: bool | None = None,
+    ) -> typing.List[typing.Tuple[typing.Text, float]]:
+        """
+        Calculate PageRank scores for nodes in the graph.
+
+        PageRank is an algorithm that measures the importance of nodes in a graph
+        based on the structure of incoming links. Nodes with higher PageRank
+        scores are considered more important.
+
+        Args:
+            relation: Specific relation type to analyze.
+            limit: Maximum number of results to return.
+            verbose: Whether to print debug information.
+
+        Returns:
+            List of tuples containing (node, pagerank_score) sorted by score
+                descending.
+        """
+
+        output: typing.List[typing.Tuple[typing.Text, float]] = []
+
+        conn = self.dvs.new_connection()
+        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+
+        with Timer() as timer:
+            query = textwrap.dedent(
+                f"""
+                FROM pagerank(
+                    {dvs.DVS_GRAPH_TABLE_NAME},
+                    {dvs.DVS_NODES_TABLE_NAME},
+                    {relation}
+                )
+                ORDER BY pagerank DESC
+                LIMIT {limit}
+                """  # noqa: E501
+            ).strip()
+
+            local_conn = conn.cursor()
+            result = local_conn.execute(query)
+            result_data = result.df().to_dict(orient="records")
+
+            output = [
+                (
+                    row["node_id"],
+                    float(row["pagerank"]),
+                )
+                for row in result_data
+            ]
+
+        debug_print(
+            query,
+            title="PageRank Analysis:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=self.dvs.v(verbose),
         )
