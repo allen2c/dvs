@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 class Points:
     def __init__(self, dvs: dvs.DVS):
+        """Initialize points API with DVS instance."""
         self.dvs = dvs
 
     def touch(self, *, verbose: bool | None = None) -> bool:

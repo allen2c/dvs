@@ -17,6 +17,7 @@ if typing.TYPE_CHECKING:
 
 class DB:
     def __init__(self, dvs: dvs.DVS):
+        """Initialize database API with DVS instance."""
         self.dvs = dvs
 
     def touch(self, *, enable_graph: bool = False, verbose: bool | None = None) -> bool:

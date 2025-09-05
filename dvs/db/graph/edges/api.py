@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class Edges:
     def __init__(self, dvs: dvs.DVS):
+        """Initialize edges API with DVS instance."""
         self.dvs = dvs
 
     @functools.cached_property

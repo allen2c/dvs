@@ -24,6 +24,7 @@ async def get_facts(
     max_concurrency: int = 1,
     verbose: bool = False,
 ) -> typing.List["Fact"]:
+    """Extract facts from documents using APS agent."""
     from aps_agent import APSAgent
 
     from dvs.types.fact import Fact
@@ -33,6 +34,7 @@ async def get_facts(
     all_facts: typing.List[Fact] = []
 
     async def run_aps_agent(doc: "Document"):
+        """Run APS agent on a single document to extract facts."""
         _input_text = doc.content
         logger.info(f"Running APS on {pretty_repr(doc.name, max_string=32)}...")
 

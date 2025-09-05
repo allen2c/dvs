@@ -6,6 +6,7 @@ import uuid_utils as uuid
 def get_id(
     type: Literal["point", "pt", "document", "doc", "node", "n", "edge", "e"],
 ) -> Text:
+    """Generate unique ID with type prefix using UUID7."""
     if type in ("point", "pt"):
         return "pt-" + str(uuid.uuid7())
     elif type in ("document", "doc"):

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class Documents:
     def __init__(self, dvs: dvs.DVS):
+        """Initialize documents API with DVS instance."""
         self.dvs = dvs
 
     def touch(self, *, verbose: bool | None = None) -> bool:

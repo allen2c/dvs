@@ -37,14 +37,17 @@ class Settings(pydantic_settings.BaseSettings):
 
     @property
     def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
+        """Get a DuckDB connection to the database."""
         return duckdb.connect(self.DUCKDB_PATH)
 
     @property
     def duckdb_path(self) -> pathlib.Path:
+        """Get the path to the DuckDB database file."""
         return pathlib.Path(self.DUCKDB_PATH)
 
     @functools.cached_property
     def console(self) -> "rich.console.Console":
+        """Get a Rich console for formatted output."""
         import rich.console
 
         return rich.console.Console()

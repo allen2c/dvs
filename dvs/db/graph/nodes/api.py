@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class Nodes:
     def __init__(self, dvs: dvs.DVS):
+        """Initialize nodes API with DVS instance."""
         self.dvs = dvs
 
     @functools.cached_property

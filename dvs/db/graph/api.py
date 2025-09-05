@@ -30,6 +30,7 @@ class Graph:
         self.dvs = dvs
 
     def touch(self, *, verbose: bool | None = None) -> bool:
+        """Initialize the property graph with required tables and extensions."""
         self.nodes.touch(verbose=self.dvs.v(verbose))
         self.edges.touch(verbose=self.dvs.v(verbose))
 
@@ -98,6 +99,7 @@ class Graph:
         limit: int = 5,
         verbose: bool | None = None,
     ) -> typing.List[typing.Tuple[NodeType, EdgeType, NodeType]]:
+        """Find neighboring nodes connected by edges with relation filtering."""
         FROM_NODE_ALIAS = "from_node"
         TO_NODE_ALIAS = "to_node"
         RELATION_ALIAS = "rel"
@@ -174,6 +176,7 @@ class Graph:
         limit: int = 15,
         verbose: bool | None = None,
     ) -> typing.List[typing.Tuple[NodeType, NodeType, int]]:
+        """Find shortest paths between nodes using graph traversal algorithms."""
         FROM_NODE_ALIAS = "from_node"
         TO_NODE_ALIAS = "to_node"
         RELATION_ALIAS = "rel"
@@ -252,22 +255,7 @@ class Graph:
         limit: int = 10,
         verbose: bool | None = None,
     ) -> typing.List[typing.Tuple[typing.Text, float]]:
-        """
-        Calculate local clustering coefficient for nodes in the graph.
-
-        The local clustering coefficient measures how connected a node's
-        neighbors are to each other. A higher coefficient indicates a more
-        tightly connected neighborhood.
-
-        Args:
-            relation: Specific relation type to analyze.
-            limit: Maximum number of results to return.
-            verbose: Whether to print debug information.
-
-        Returns:
-            List of tuples containing (node, clustering_coefficient) sorted
-                by coefficient descending.
-        """
+        """Calculate local clustering coefficient for nodes in the graph."""
         output: typing.List[typing.Tuple[typing.Text, float]] = []
 
         conn = self.dvs.new_connection()
@@ -313,21 +301,7 @@ class Graph:
         limit: int = 15,
         verbose: bool | None = None,
     ) -> typing.List[typing.Tuple[typing.Text, int]]:
-        """
-        Find weakly connected components in the graph.
-
-        Weakly connected components identify groups of nodes that are connected
-        when considering undirected edges (ignoring direction).
-
-        Args:
-            relation: Specific relation type to analyze.
-            limit: Maximum number of results to return.
-            verbose: Whether to print debug information.
-
-        Returns:
-            List of tuples containing (node, component_id) ordered by
-                component_id.
-        """
+        """Find weakly connected components in the graph."""
         output: typing.List[typing.Tuple[typing.Text, int]] = []
 
         conn = self.dvs.new_connection()
@@ -373,22 +347,7 @@ class Graph:
         limit: int = 10,
         verbose: bool | None = None,
     ) -> typing.List[typing.Tuple[typing.Text, float]]:
-        """
-        Calculate PageRank scores for nodes in the graph.
-
-        PageRank is an algorithm that measures the importance of nodes in a graph
-        based on the structure of incoming links. Nodes with higher PageRank
-        scores are considered more important.
-
-        Args:
-            relation: Specific relation type to analyze.
-            limit: Maximum number of results to return.
-            verbose: Whether to print debug information.
-
-        Returns:
-            List of tuples containing (node, pagerank_score) sorted by score
-                descending.
-        """
+        """Calculate PageRank scores for nodes in the graph."""
 
         output: typing.List[typing.Tuple[typing.Text, float]] = []
 

@@ -36,6 +36,7 @@ class DVSMixin(abc.ABC):
     def _ensure_dvs_settings(
         self, settings: typing.Union[pathlib.Path, str] | Settings
     ) -> Settings:
+        """Ensure DVS settings are properly configured and validated."""
         if isinstance(settings, Settings):
             pass
         else:
@@ -49,6 +50,7 @@ class DVSMixin(abc.ABC):
     def _ensure_model(
         self, model: oai_emb_model.OpenAIEmbeddingsModel | str
     ) -> oai_emb_model.OpenAIEmbeddingsModel:
+        """Ensure OpenAI embeddings model is properly initialized."""
         if isinstance(model, oai_emb_model.OpenAIEmbeddingsModel):
             return model
         else:
@@ -140,6 +142,7 @@ class DVS(DVSMixin):
 
     @property
     def duckdb_path(self) -> pathlib.Path:
+        """Get the path to the DuckDB database file."""
         return self.settings.duckdb_path
 
     def new_connection(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
@@ -318,4 +321,5 @@ class DVS(DVSMixin):
         return Tokens(self)
 
     def v(self, verbose: bool | None = None) -> bool:
+        """Get verbosity setting, with optional override."""
         return self.verbose if verbose is None else verbose
