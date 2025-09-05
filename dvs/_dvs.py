@@ -42,9 +42,6 @@ class DVS:
         self.model_settings = model_settings or oai_emb_model.ModelSettings()
         self.enable_graph = enable_graph
 
-        # Attributes
-        self._conn: duckdb.DuckDBPyConnection | None = None
-
         # Init database resources
         self.db_manifest = self._ensure_manifest(
             self.model, self.model_settings, verbose=self.verbose
@@ -58,25 +55,9 @@ class DVS:
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
-        """
-        Always use the same duckdb connection.
-        """
-        if self._conn is None:
-            self._conn = duckdb.connect(self.duckdb_path)
-
-        # Check if the connection is still open
-        try:
-            self._conn.execute("SELECT version() AS version").fetchone()
-        except duckdb.ConnectionException as e:
-            if "already closed" in str(e).lower():
-                logger.warning("DuckDB connection is closed, reconnecting")
-                self._conn = duckdb.connect(self.duckdb_path)
-            else:
-                raise e
-        except Exception as e:
-            raise e
-
-        return self._conn
+        """Always use a new duckdb connection."""
+        conn = duckdb.connect(self.duckdb_path)
+        return conn
 
     def add(
         self,

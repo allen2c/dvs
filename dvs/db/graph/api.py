@@ -2,6 +2,7 @@ import functools
 import logging
 import textwrap
 import typing
+from concurrent.futures import ThreadPoolExecutor
 
 import dvs
 from dvs.types.edge import Edge as EdgeType
@@ -14,6 +15,7 @@ from dvs.types.edge import (
 )
 from dvs.types.node import Node as NodeType
 from dvs.utils.debug_print import debug_print
+from dvs.utils.sql_stmts import SQL_STMT_LOAD_DUCKPGQ
 from dvs.utils.timer import Timer
 
 if typing.TYPE_CHECKING:
@@ -32,6 +34,11 @@ class Graph:
         self.edges.touch(verbose=verbose)
 
         with Timer() as timer:
+            conn = self.dvs.conn
+            # First, execute the extension installation
+            conn.execute("LOAD duckpgq;")
+
+            # Then, create the property graph
             create_table_sql = textwrap.dedent(
                 f"""
                 CREATE PROPERTY GRAPH {dvs.DVS_GRAPH_TABLE_NAME}
@@ -59,7 +66,7 @@ class Graph:
                 """  # noqa: E501
             )
 
-            self.dvs.conn.execute(create_table_sql)
+            conn.execute(create_table_sql)
 
         debug_print(
             create_table_sql,
@@ -84,7 +91,7 @@ class Graph:
 
     def get_neighbors(
         self,
-        node: str,
+        node_id_or_label: str | None = None,
         *,
         relation: RelationType | None = None,
         limit: int = 5,
@@ -94,38 +101,55 @@ class Graph:
         TO_NODE_ALIAS = "to_node"
         RELATION_ALIAS = "rel"
 
-        output = []
-        queries = []
+        output: typing.List[typing.Tuple[NodeType, EdgeType, NodeType]] = []
+        query_relations = (
+            [RelationIsA, RelationHasA, RelationRelatedTo, RelationIsFrom]
+            if relation is None
+            else [relation]
+        )
+        conn = self.dvs.conn
+        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+
+        def run_query(
+            query: str,
+        ) -> typing.List[typing.Tuple[NodeType, EdgeType, NodeType]]:
+            local_conn = conn.cursor()
+            result = local_conn.execute(query)
+            result_data = result.df().to_dict(orient="records")
+            return [
+                (
+                    NodeType.model_validate(row[FROM_NODE_ALIAS]),
+                    EdgeType.model_validate(row[RELATION_ALIAS]),
+                    NodeType.model_validate(row[TO_NODE_ALIAS]),
+                )
+                for row in result_data
+            ]
+
         with Timer() as timer:
-            for each_relation in (
-                [relation]
-                if relation is not None
-                else [RelationIsA, RelationHasA, RelationRelatedTo, RelationIsFrom]
-            ):
-                query = textwrap.dedent(
+            condition = (
+                f" WHERE {FROM_NODE_ALIAS}.node_id = '{node_id_or_label}'"
+                if node_id_or_label
+                else ""
+            )
+            queries = [
+                textwrap.dedent(
                     f"""
                     FROM GRAPH_TABLE (
                         {dvs.DVS_GRAPH_TABLE_NAME}
-                        MATCH ({FROM_NODE_ALIAS}:nodes)-[{RELATION_ALIAS}:{each_relation}]->({TO_NODE_ALIAS}:nodes)
+                        MATCH ({FROM_NODE_ALIAS}:nodes{condition})-[{RELATION_ALIAS}:{query_relation}]->({TO_NODE_ALIAS}:nodes)
                         COLUMNS ({FROM_NODE_ALIAS}, {RELATION_ALIAS}, {TO_NODE_ALIAS})
                     )
                     ORDER BY {FROM_NODE_ALIAS}.node_id
                     LIMIT {limit};
                     """  # noqa: E501
                 )
-                queries.append(query)
+                for query_relation in query_relations
+            ]
 
-                result = self.dvs.conn.execute(query)
-
-                result_data = result.df().to_dict(orient="records")
-                for row in result_data:
-                    output.append(
-                        (
-                            NodeType.model_validate(row[FROM_NODE_ALIAS]),
-                            EdgeType.model_validate(row[RELATION_ALIAS]),
-                            NodeType.model_validate(row[TO_NODE_ALIAS]),
-                        )
-                    )
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = executor.map(run_query, queries)
+                for result in results:
+                    output.extend(result)
 
         debug_print(
             "\n\n---\n\n".join(queries),

@@ -63,6 +63,9 @@ SQL_STMT_HNSW_COMPACT_INDEX: Final[Text] = (
 )
 
 # SQL Install extensions
+SQL_STMT_LOAD_VSS: Final[Text] = "LOAD vss;"
+SQL_STMT_LOAD_JSON: Final[Text] = "LOAD json;"
+SQL_STMT_LOAD_DUCKPGQ: Final[Text] = "LOAD duckpgq;"
 SQL_STMT_INSTALL_EXTENSIONS: Final[Text] = dedent(
     """
     INSTALL vss;
