@@ -24,13 +24,21 @@ class Edge(pydantic.BaseModel):
         ...,
         description="Relation of the edge.",
     )
-    from_node: str = pydantic.Field(
+    from_node_id: str = pydantic.Field(
         ...,
-        description="Identifier label name of the from node label.",
+        description="Identifier of the from node id.",
     )
-    to_node: str = pydantic.Field(
+    from_node_label: str = pydantic.Field(
         ...,
-        description="Identifier label name of the to node label.",
+        description="Label name of the from node.",
+    )
+    to_node_id: str = pydantic.Field(
+        ...,
+        description="Identifier of the to node id.",
+    )
+    to_node_label: str = pydantic.Field(
+        ...,
+        description="Label name of the to node.",
     )
 
     @pydantic.model_validator(mode="after")

@@ -97,11 +97,7 @@ async def build_graph_from_documents(
         for _node in _nodes:
             G.add_node(_node.node_id, **_node.model_dump())
         for _edge in _edges:
-            G.add_edge(
-                labels_nodes_map[_edge.from_node].node_id,
-                labels_nodes_map[_edge.to_node].node_id,
-                **_edge.model_dump(),
-            )
+            G.add_edge(_edge.from_node_id, _edge.to_node_id, **_edge.model_dump())
 
     # Add triplets into graph
     for _triplet in all_triplets:
@@ -113,11 +109,7 @@ async def build_graph_from_documents(
         for _node in _nodes:
             G.add_node(_node.node_id, **_node.model_dump())
         for _edge in _edges:
-            G.add_edge(
-                labels_nodes_map[_edge.from_node].node_id,
-                labels_nodes_map[_edge.to_node].node_id,
-                **_edge.model_dump(),
-            )
+            G.add_edge(_edge.from_node_id, _edge.to_node_id, **_edge.model_dump())
 
     if None in labels_nodes_map:
         raise ValueError("None in labels_nodes_map")

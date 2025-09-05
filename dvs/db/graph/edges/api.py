@@ -57,7 +57,14 @@ class Edges:
                         table_name=table_name,
                         primary_key="edge_id",
                         unique_fields=[],
-                        indexes=["edge_id", "relation", "from_node", "to_node"],
+                        indexes=[
+                            "edge_id",
+                            "relation",
+                            "from_node_id",
+                            "to_node_id",
+                            "from_node_label",
+                            "to_node_label",
+                        ],
                     )
                 )
             sql_stmt = ";\n".join(sqls)
@@ -180,6 +187,8 @@ class Edges:
         self,
         *,
         relation: RelationType,
+        from_node_id: typing.Optional[typing.Text] = None,
+        to_node_id: typing.Optional[typing.Text] = None,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
@@ -202,11 +211,17 @@ class Edges:
         # in insensitive case
         where_clauses.append("relation = ?")
         parameters.append(relation)
+        if from_node_id is not None:
+            where_clauses.append("from_node_id = ?")
+            parameters.append(from_node_id)
+        if to_node_id is not None:
+            where_clauses.append("to_node_id = ?")
+            parameters.append(to_node_id)
         if from_node_label_contains is not None:
-            where_clauses.append("from_node ILIKE ?")
+            where_clauses.append("from_node_label ILIKE ?")
             parameters.append(f"%{from_node_label_contains}%")
         if to_node_label_contains is not None:
-            where_clauses.append("to_node ILIKE ?")
+            where_clauses.append("to_node_label ILIKE ?")
             parameters.append(f"%{to_node_label_contains}%")
 
         if after is not None:
@@ -266,6 +281,8 @@ class Edges:
         self,
         *,
         relation: RelationType,
+        from_node_id: typing.Optional[typing.Text] = None,
+        to_node_id: typing.Optional[typing.Text] = None,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
@@ -279,6 +296,8 @@ class Edges:
         while has_more:
             edges = self.list(
                 relation=relation,
+                from_node_id=from_node_id,
+                to_node_id=to_node_id,
                 from_node_label_contains=from_node_label_contains,
                 to_node_label_contains=to_node_label_contains,
                 after=current_after,
@@ -296,6 +315,8 @@ class Edges:
         self,
         *,
         relation: RelationType,
+        from_node_id: typing.Optional[typing.Text] = None,
+        to_node_id: typing.Optional[typing.Text] = None,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
         verbose: bool | None = None,
@@ -310,11 +331,17 @@ class Edges:
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
+        if from_node_id is not None:
+            where_clauses.append("from_node_id = ?")
+            parameters.append(from_node_id)
+        if to_node_id is not None:
+            where_clauses.append("to_node_id = ?")
+            parameters.append(to_node_id)
         if from_node_label_contains is not None:
-            where_clauses.append("from_node ILIKE ?")
+            where_clauses.append("from_node_label ILIKE ?")
             parameters.append(f"%{from_node_label_contains}%")
         if to_node_label_contains is not None:
-            where_clauses.append("to_node ILIKE ?")
+            where_clauses.append("to_node_label ILIKE ?")
             parameters.append(f"%{to_node_label_contains}%")
 
         if where_clauses:

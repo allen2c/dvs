@@ -54,7 +54,11 @@ class Entity(NerEntity):
             doc_edge = labels_edges_map[
                 (entity_node.label, doc_node.label, relation)
             ] = Edge(
-                from_node=entity_node.label, to_node=doc_node.label, relation=relation
+                from_node_id=entity_node.node_id,
+                from_node_label=entity_node.label,
+                to_node_id=doc_node.node_id,
+                to_node_label=doc_node.label,
+                relation=relation,
             )
         else:
             doc_edge = labels_edges_map[(entity_node.label, doc_node.label, relation)]

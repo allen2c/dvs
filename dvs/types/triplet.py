@@ -59,10 +59,40 @@ class Triplet(NerTriplet):
             object_node = labels_nodes_map[object_norm]
         output_nodes.append(object_node)
 
-        # Handle edge
+        # Handle subject-document edge
+        if (doc_node.label, subject_norm, "is_from") not in labels_edges_map:
+            _edge = labels_edges_map[(doc_node.label, subject_norm, "is_from")] = Edge(
+                from_node_id=doc_node.node_id,
+                from_node_label=doc_node.label,
+                to_node_id=subject_node.node_id,
+                to_node_label=subject_node.label,
+                relation="is_from",
+            )
+        else:
+            _edge = labels_edges_map[(doc_node.label, subject_norm, "is_from")]
+        output_edges.append(_edge)
+
+        # Handle object-document edge
+        if (doc_node.label, object_norm, "is_from") not in labels_edges_map:
+            _edge = labels_edges_map[(doc_node.label, object_norm, "is_from")] = Edge(
+                from_node_id=doc_node.node_id,
+                from_node_label=doc_node.label,
+                to_node_id=object_node.node_id,
+                to_node_label=object_node.label,
+                relation="is_from",
+            )
+        else:
+            _edge = labels_edges_map[(doc_node.label, object_norm, "is_from")]
+        output_edges.append(_edge)
+
+        # Handle triplet edge
         if (subject_norm, object_norm, self.relation) not in labels_edges_map:
             _edge = labels_edges_map[(subject_norm, object_norm, self.relation)] = Edge(
-                from_node=subject_norm, to_node=object_norm, relation=self.relation
+                from_node_id=labels_nodes_map[subject_norm].node_id,
+                from_node_label=labels_nodes_map[subject_norm].label,
+                to_node_id=labels_nodes_map[object_norm].node_id,
+                to_node_label=labels_nodes_map[object_norm].label,
+                relation=self.relation,
             )
         else:
             _edge = labels_edges_map[(subject_norm, object_norm, self.relation)]

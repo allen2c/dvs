@@ -38,20 +38,20 @@ class Graph:
                 )
                 EDGE TABLES (
                     {dvs.DVS_EDGES_IS_A_TABLE_NAME}
-                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
-                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        SOURCE KEY (from_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
                         LABEL {RelationIsA},
                     {dvs.DVS_EDGES_HAS_A_TABLE_NAME}
-                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
-                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        SOURCE KEY (from_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
                         LABEL {RelationHasA},
                     {dvs.DVS_EDGES_RELATED_TO_TABLE_NAME}
-                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
-                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        SOURCE KEY (from_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
                         LABEL {RelationRelatedTo},
                     {dvs.DVS_EDGES_IS_FROM_TABLE_NAME}
-                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
-                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        SOURCE KEY (from_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node_id) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
                         LABEL {RelationIsFrom}
                 )
                 """  # noqa: E501
