@@ -91,7 +91,8 @@ class Graph:
 
     def get_neighbors(
         self,
-        node_id_or_label: str | None = None,
+        from_node_id_or_label: str | None = None,
+        to_node_id_or_label: str | None = None,
         *,
         relation: RelationType | None = None,
         limit: int = 5,
@@ -126,9 +127,14 @@ class Graph:
             ]
 
         with Timer() as timer:
-            condition = (
-                f" WHERE {FROM_NODE_ALIAS}.node_id = '{node_id_or_label}'"
-                if node_id_or_label
+            from_condition = (
+                f" WHERE {FROM_NODE_ALIAS}.node_id = '{from_node_id_or_label}'"
+                if from_node_id_or_label
+                else ""
+            )
+            to_condition = (
+                f" WHERE {TO_NODE_ALIAS}.node_id = '{to_node_id_or_label}'"
+                if to_node_id_or_label
                 else ""
             )
             queries = [
@@ -136,7 +142,7 @@ class Graph:
                     f"""
                     FROM GRAPH_TABLE (
                         {dvs.DVS_GRAPH_TABLE_NAME}
-                        MATCH ({FROM_NODE_ALIAS}:nodes{condition})-[{RELATION_ALIAS}:{query_relation}]->({TO_NODE_ALIAS}:nodes)
+                        MATCH ({FROM_NODE_ALIAS}:nodes{from_condition})-[{RELATION_ALIAS}:{query_relation}]->({TO_NODE_ALIAS}:nodes{to_condition})
                         COLUMNS ({FROM_NODE_ALIAS}, {RELATION_ALIAS}, {TO_NODE_ALIAS})
                     )
                     ORDER BY {FROM_NODE_ALIAS}.node_id
@@ -154,6 +160,93 @@ class Graph:
         debug_print(
             "\n\n---\n\n".join(queries),
             title="Getting neighbors with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return output
+
+    def get_shortest_paths(
+        self,
+        from_node_id_or_label: str | None = None,
+        to_node_id_or_label: str | None = None,
+        *,
+        relation: RelationType | None = None,
+        limit: int = 15,
+        verbose: bool | None = None,
+    ) -> typing.List[typing.Tuple[NodeType, NodeType, int]]:
+        FROM_NODE_ALIAS = "from_node"
+        TO_NODE_ALIAS = "to_node"
+        RELATION_ALIAS = "rel"
+        DISTANCE_ALIAS = "distance"
+
+        output: typing.List[typing.Tuple[NodeType, NodeType, int]] = []
+        query_relations = (
+            [RelationIsA, RelationHasA, RelationRelatedTo, RelationIsFrom]
+            if relation is None
+            else [relation]
+        )
+        conn = self.dvs.new_connection()
+        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+
+        def run_query(
+            query: str,
+        ) -> typing.List[typing.Tuple[NodeType, NodeType, int]]:
+            print()
+            print()
+            print()
+            print(query)
+            print()
+            print()
+            print()
+            local_conn = conn.cursor()
+            result = local_conn.execute(query)
+            result_data = result.df().to_dict(orient="records")
+            return [
+                (
+                    NodeType.model_validate(row[FROM_NODE_ALIAS]),
+                    NodeType.model_validate(row[TO_NODE_ALIAS]),
+                    row[DISTANCE_ALIAS],
+                )
+                for row in result_data
+            ]
+
+        with Timer() as timer:
+            from_condition = (
+                f" WHERE {FROM_NODE_ALIAS}.node_id = '{from_node_id_or_label}'"
+                if from_node_id_or_label
+                else ""
+            )
+            to_condition = (
+                f" WHERE {TO_NODE_ALIAS}.node_id = '{to_node_id_or_label}'"
+                if to_node_id_or_label
+                else ""
+            )
+            queries = [
+                textwrap.dedent(
+                    f"""
+                    FROM GRAPH_TABLE (
+                        {dvs.DVS_GRAPH_TABLE_NAME}
+                        MATCH p = ANY SHORTEST ({FROM_NODE_ALIAS}:nodes{from_condition})-[{RELATION_ALIAS}:{query_relation}]->+({TO_NODE_ALIAS}:nodes{to_condition})
+                        COLUMNS ({FROM_NODE_ALIAS}, {TO_NODE_ALIAS}, path_length(p) as {DISTANCE_ALIAS})
+                    )
+                    ORDER BY {DISTANCE_ALIAS}
+                    LIMIT {limit};
+                    """  # noqa: E501
+                )
+                for query_relation in query_relations
+            ]
+
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = executor.map(run_query, queries)
+                for result in results:
+                    output.extend(result)
+
+        output.sort(key=lambda x: x[-1])
+        output = output[:limit]
+
+        debug_print(
+            "\n\n---\n\n".join(queries),
+            title="Getting shortest paths with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=self.dvs.v(verbose),
         )
