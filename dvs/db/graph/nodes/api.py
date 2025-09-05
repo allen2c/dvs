@@ -59,13 +59,18 @@ class Nodes:
     def retrieve(
         self, node_id: typing.Text, *, verbose: bool | None = None
     ) -> NodeType:
-        query = f"SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME}"
+        query = f"""
+            SELECT {self.columns_expr}
+            FROM {dvs.DVS_NODES_TABLE_NAME}
+            WHERE node_id = ?
+        """
+        parameters = [node_id]
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query).fetchone()
+            result = self.dvs.conn.execute(query, parameters).fetchone()
 
         debug_print(
-            f"{query}",
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Retrieving node with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
@@ -74,6 +79,36 @@ class Nodes:
         if result is None:
             raise openai.NotFoundError(
                 f"Node with ID '{node_id}' not found.",
+                response=dummy_httpx_response(404, b"Not Found"),
+                body=None,
+            )
+
+        data = dict(zip(self.columns, result))
+        node = NodeType.model_validate(data)
+
+        return node
+
+    def retrieve_by_label(
+        self, label: typing.Text, *, verbose: bool | None = None
+    ) -> NodeType:
+        query = f"""
+            SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME} WHERE label = ?
+        """
+        parameters = [label]
+
+        with Timer() as timer:
+            result = self.dvs.conn.execute(query, parameters).fetchone()
+
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Retrieving node with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=verbose,
+        )
+
+        if result is None:
+            raise openai.NotFoundError(
+                f"Node with label '{label}' not found.",
                 response=dummy_httpx_response(404, b"Not Found"),
                 body=None,
             )
