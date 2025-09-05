@@ -24,7 +24,7 @@ class Manifest:
         Returns True when table creation is completed successfully.
         """
 
-        self._touch(verbose=verbose)
+        self._touch(verbose=self.dvs.v(verbose))
 
         return True
 
@@ -33,12 +33,11 @@ class Manifest:
         Retrieve the manifest from the DuckDB database.
         Returns None if no manifest record exists.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         with Timer() as timer:
-            out = self._receive(verbose=verbose)
+            out = self._receive(verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Retrieved manifest in {dur:.3f} ms")
 
@@ -51,12 +50,11 @@ class Manifest:
         Insert a new manifest record into the DuckDB database.
         Returns the created manifest instance.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         with Timer() as timer:
-            out = self._create(manifest, verbose=verbose)
+            out = self._create(manifest, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Created manifest in {dur:.3f} ms")
 
@@ -67,12 +65,11 @@ class Manifest:
         Drop the manifest table and all its data.
         This operation is irreversible.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         with Timer() as timer:
-            self._drop(verbose=verbose)
+            self._drop(verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(
                 f"Dropped table: '{dvs.DVS_MANIFEST_TABLE_NAME}' in {dur:.3f} ms"
@@ -105,7 +102,7 @@ class Manifest:
             f"{create_table_sql}",
             title=f"Creating table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return True
@@ -132,7 +129,7 @@ class Manifest:
             f"{query}",
             title="Retrieving manifest with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         if result is None:
@@ -169,7 +166,7 @@ class Manifest:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Creating manifest with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return manifest
@@ -187,5 +184,5 @@ class Manifest:
             f"{query}",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             title=f"Dropping table: '{dvs.DVS_MANIFEST_TABLE_NAME}' with SQL",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )

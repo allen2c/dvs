@@ -30,8 +30,8 @@ class Graph:
         self.dvs = dvs
 
     def touch(self, *, verbose: bool | None = None) -> bool:
-        self.nodes.touch(verbose=verbose)
-        self.edges.touch(verbose=verbose)
+        self.nodes.touch(verbose=self.dvs.v(verbose))
+        self.edges.touch(verbose=self.dvs.v(verbose))
 
         with Timer() as timer:
             conn = self.dvs.new_connection()
@@ -72,7 +72,7 @@ class Graph:
             create_table_sql,
             title=f"Creating table: '{dvs.DVS_GRAPH_TABLE_NAME}' with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
         logger.info(f"✅ Created property graph: '{dvs.DVS_GRAPH_TABLE_NAME}'")
         return True
@@ -155,6 +155,6 @@ class Graph:
             "\n\n---\n\n".join(queries),
             title="Getting neighbors with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
         return output

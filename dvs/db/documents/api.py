@@ -30,9 +30,9 @@ class Documents:
         Creates the table if it doesn't exist, installs necessary extensions.
         """
         with Timer() as timer:
-            self._touch(verbose=verbose)
+            self._touch(verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(
                 f"Created table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
@@ -48,8 +48,8 @@ class Documents:
         Raises NotFoundError if the document doesn't exist.
         """
         with Timer() as timer:
-            out = self._retrieve(document_id, verbose=verbose)
-        if verbose:
+            out = self._retrieve(document_id, verbose=self.dvs.v(verbose))
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Retrieved document: '{document_id}' in {dur:.3f} ms")
         return out
@@ -64,11 +64,10 @@ class Documents:
         Create a single document in the DuckDB database.
         Accepts either a Document instance or a dictionary.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
-            docs = self.bulk_create([document], verbose=verbose)
+            docs = self.bulk_create([document], verbose=self.dvs.v(verbose))
         doc = docs[0]
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Created document: '{doc.document_id}' in {dur:.3f} ms")
         return doc
@@ -96,9 +95,9 @@ class Documents:
                 )
                 for doc in documents
             ]
-            self._bulk_create(documents, verbose=verbose)
+            self._bulk_create(documents, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur, unit = (
                 (timer.duration, "s")
                 if timer.duration > 1.0
@@ -113,11 +112,10 @@ class Documents:
         Remove a document from the DuckDB database by its ID.
         Uses parameterized queries to prevent SQL injection.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
-            self._remove(document_id, verbose=verbose)
+            self._remove(document_id, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Deleted document: '{document_id}' in {dur:.3f} ms")
         return None
@@ -145,10 +143,10 @@ class Documents:
                 before=before,
                 limit=limit,
                 order=order,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Listed documents in {dur:.3f} ms")
         return out
@@ -178,7 +176,7 @@ class Documents:
                 before=before,
                 limit=limit,
                 order=order,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
             has_more = documents.has_more
             current_after = documents.last_id
@@ -196,14 +194,13 @@ class Documents:
         Count the number of documents in the DuckDB database.
         Supports optional filtering by document_id and content_md5.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             out = self._count(
                 document_id=document_id,
                 content_md5=content_md5,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Counted documents in {dur:.3f} ms")
         return out
@@ -220,11 +217,11 @@ class Documents:
                 source_id=None,
                 limit=1,
                 order="asc",
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
                 after=None,
                 before=None,
             )
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Checked content_md5 in {dur:.3f} ms")
         return len(out.data) > 0
@@ -244,15 +241,13 @@ class Documents:
         if not force:
             raise ValueError("Use force=True to drop table.")
 
-        verbose = self.dvs.verbose if verbose is None else verbose
-
         with Timer() as timer:
-            self._drop(verbose=verbose)
+            self._drop(verbose=self.dvs.v(verbose))
 
         if touch_after_drop:
-            self._touch(verbose=verbose)
+            self._touch(verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(
                 f"Dropped table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
@@ -265,7 +260,7 @@ class Documents:
         Ensure the existence of the documents table in the DuckDB database.
         """
         # Install JSON and VSS extensions
-        self.dvs.db.install_extensions(verbose=verbose)
+        self.dvs.db.install_extensions(verbose=self.dvs.v(verbose))
 
         with Timer() as timer:
             # Create table
@@ -292,7 +287,7 @@ class Documents:
             create_table_sql,
             title=f"Creating table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return True
@@ -303,7 +298,6 @@ class Documents:
         """
         Retrieve a document from the DuckDB database by its ID.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         columns = list(DocumentType.model_json_schema()["properties"].keys())
         columns = [c for c in columns if c != "embedding"]
@@ -334,7 +328,7 @@ class Documents:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title=f"Retrieving document: '{document_id}' with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         data = dict(zip(columns, result))
@@ -376,7 +370,7 @@ class Documents:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
             title="Creating documents with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
         return list(documents)
 
@@ -396,7 +390,7 @@ class Documents:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Deleting document with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return None
@@ -458,7 +452,7 @@ class Documents:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Listing documents with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         results = [
@@ -519,7 +513,7 @@ class Documents:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Counting documents with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         count = result[0] if result else 0
@@ -541,7 +535,7 @@ class Documents:
             f"{query}",
             title=f"Dropping table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return None

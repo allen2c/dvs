@@ -82,7 +82,7 @@ class Edges:
             sql_stmt,
             title=f"Creating table: {table_names_expr} with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return True
@@ -118,7 +118,7 @@ class Edges:
             f"{query}",
             title="Retrieving edge with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         if result is None:
@@ -141,7 +141,7 @@ class Edges:
     ) -> EdgeType:
         edges = self.bulk_create(
             [edge if isinstance(edge, EdgeType) else EdgeType.model_validate(edge)],
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
         return edges[0]
 
@@ -182,7 +182,7 @@ class Edges:
             "\n\n".join(queries),
             title="Creating edges with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         logger.info(f"✅ Created {len(edges)} edges.")
@@ -265,7 +265,7 @@ class Edges:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Listing edges with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         results = [
@@ -314,7 +314,7 @@ class Edges:
                 before=before,
                 limit=limit,
                 order=order,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
             has_more = edges.has_more
             current_after = edges.last_id
@@ -369,7 +369,7 @@ class Edges:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Counting edges with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         count = result[0] if result else 0

@@ -1,3 +1,4 @@
+import abc
 import functools
 import logging
 import pathlib
@@ -26,7 +27,95 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DVS:
+class DVSMixin(abc.ABC):
+    db: "DB"
+    model: oai_emb_model.OpenAIEmbeddingsModel
+    model_settings: oai_emb_model.ModelSettings
+    verbose: bool
+
+    def _ensure_dvs_settings(
+        self, settings: typing.Union[pathlib.Path, str] | Settings
+    ) -> Settings:
+        if isinstance(settings, Settings):
+            pass
+        else:
+            settings = Settings(DUCKDB_PATH=str(settings))
+
+        if settings.DUCKDB_PATH is None:
+            raise ValueError("DUCKDB_PATH is not set")
+
+        return settings
+
+    def _ensure_model(
+        self, model: oai_emb_model.OpenAIEmbeddingsModel | str
+    ) -> oai_emb_model.OpenAIEmbeddingsModel:
+        if isinstance(model, oai_emb_model.OpenAIEmbeddingsModel):
+            return model
+        else:
+            return oai_emb_model.OpenAIEmbeddingsModel(
+                model, openai.OpenAI(), cache=oai_emb_model.get_default_cache()
+            )
+
+    def _ensure_manifest(
+        self,
+        model: oai_emb_model.OpenAIEmbeddingsModel,
+        model_settings: oai_emb_model.ModelSettings,
+        verbose: bool,
+    ) -> "ManifestType":
+        """
+        Ensure database manifest is consistent with model and model settings.
+        Creates manifest if missing or validates existing one against current model.
+        Sets dimensions in model_settings if None and returns the manifest.
+        """  # noqa: E501
+        from dvs.types.manifest import Manifest as ManifestType
+
+        # Ensure the manifest table exists
+        if dvs.DVS_MANIFEST_TABLE_NAME not in self.db.show_table_names():
+            logger.debug("Manifest table does not exist, creating it")
+            self.db.manifest.touch(verbose=verbose)
+
+        might_manifest = self.db.manifest.receive(verbose=verbose)
+
+        # If the manifest table exists but is empty, create a new manifest
+        if might_manifest is None:
+            logger.debug("Manifest table is empty, creating a new manifest")
+            if model_settings.dimensions is None:
+                raise ValueError(
+                    "Could not infer the embedding dimensions, "
+                    + "please provide the model settings."
+                )
+
+            self.db_manifest = self.db.manifest.create(
+                ManifestType(
+                    embedding_model=self.model.model,
+                    embedding_dimensions=model_settings.dimensions,
+                ),
+                verbose=verbose,
+            )
+
+        # If the manifest table exists and is not empty, use the existing manifest
+        else:
+            logger.debug("Manifest table exists, using the existing manifest")
+            self.db_manifest = might_manifest
+
+            if self.db_manifest.embedding_model != model.model:
+                raise ValueError(
+                    "The indicated embedding model is not the same as "
+                    + "the one in the manifest of the database"
+                )
+            if model_settings.dimensions is not None:
+                if self.db_manifest.embedding_dimensions != model_settings.dimensions:
+                    raise ValueError(
+                        "The indicated embedding dimensions are not the same as "
+                        + "the one in the manifest of the database"
+                    )
+            else:
+                model_settings.dimensions = self.db_manifest.embedding_dimensions
+
+        return self.db_manifest
+
+
+class DVS(DVSMixin):
     def __init__(
         self,
         settings: typing.Union[pathlib.Path, str] | Settings,
@@ -230,84 +319,3 @@ class DVS:
 
     def v(self, verbose: bool | None = None) -> bool:
         return self.verbose if verbose is None else verbose
-
-    def _ensure_dvs_settings(
-        self, settings: typing.Union[pathlib.Path, str] | Settings
-    ) -> Settings:
-        if isinstance(settings, Settings):
-            pass
-        else:
-            settings = Settings(DUCKDB_PATH=str(settings))
-
-        if settings.DUCKDB_PATH is None:
-            raise ValueError("DUCKDB_PATH is not set")
-
-        return settings
-
-    def _ensure_model(
-        self, model: oai_emb_model.OpenAIEmbeddingsModel | str
-    ) -> oai_emb_model.OpenAIEmbeddingsModel:
-        if isinstance(model, oai_emb_model.OpenAIEmbeddingsModel):
-            return model
-        else:
-            return oai_emb_model.OpenAIEmbeddingsModel(
-                model, openai.OpenAI(), cache=oai_emb_model.get_default_cache()
-            )
-
-    def _ensure_manifest(
-        self,
-        model: oai_emb_model.OpenAIEmbeddingsModel,
-        model_settings: oai_emb_model.ModelSettings,
-        verbose: bool,
-    ) -> "ManifestType":
-        """
-        Ensure database manifest is consistent with model and model settings.
-        Creates manifest if missing or validates existing one against current model.
-        Sets dimensions in model_settings if None and returns the manifest.
-        """  # noqa: E501
-        from dvs.types.manifest import Manifest as ManifestType
-
-        # Ensure the manifest table exists
-        if dvs.DVS_MANIFEST_TABLE_NAME not in self.db.show_table_names():
-            logger.debug("Manifest table does not exist, creating it")
-            self.db.manifest.touch(verbose=verbose)
-
-        might_manifest = self.db.manifest.receive(verbose=verbose)
-
-        # If the manifest table exists but is empty, create a new manifest
-        if might_manifest is None:
-            logger.debug("Manifest table is empty, creating a new manifest")
-            if model_settings.dimensions is None:
-                raise ValueError(
-                    "Could not infer the embedding dimensions, "
-                    + "please provide the model settings."
-                )
-
-            self.db_manifest = self.db.manifest.create(
-                ManifestType(
-                    embedding_model=self.model.model,
-                    embedding_dimensions=model_settings.dimensions,
-                ),
-                verbose=verbose,
-            )
-
-        # If the manifest table exists and is not empty, use the existing manifest
-        else:
-            logger.debug("Manifest table exists, using the existing manifest")
-            self.db_manifest = might_manifest
-
-            if self.db_manifest.embedding_model != model.model:
-                raise ValueError(
-                    "The indicated embedding model is not the same as "
-                    + "the one in the manifest of the database"
-                )
-            if model_settings.dimensions is not None:
-                if self.db_manifest.embedding_dimensions != model_settings.dimensions:
-                    raise ValueError(
-                        "The indicated embedding dimensions are not the same as "
-                        + "the one in the manifest of the database"
-                    )
-            else:
-                model_settings.dimensions = self.db_manifest.embedding_dimensions
-
-        return self.db_manifest

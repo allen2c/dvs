@@ -25,13 +25,13 @@ class DB:
         Creates manifest, documents, and points tables with proper schemas and indexes.
         Installs required DuckDB extensions and sets up HNSW indexing for searches.
         """
-        if not self.manifest.touch(verbose=verbose):
+        if not self.manifest.touch(verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the manifest table")
-        if not self.documents.touch(verbose=verbose):
+        if not self.documents.touch(verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the documents table")
-        if not self.points.touch(verbose=verbose):
+        if not self.points.touch(verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the points table")
-        if enable_graph and not self.graph.touch(verbose=verbose):
+        if enable_graph and not self.graph.touch(verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the graph table")
         return True
 
@@ -39,7 +39,6 @@ class DB:
         """
         Install required DuckDB extensions for the database.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         with Timer() as timer:
             self.dvs.new_connection().cursor().sql(SQL_STMT_INSTALL_EXTENSIONS)
@@ -48,7 +47,7 @@ class DB:
             SQL_STMT_INSTALL_EXTENSIONS,
             title="Installing extensions with SQL",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return True

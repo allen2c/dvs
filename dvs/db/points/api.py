@@ -39,8 +39,8 @@ class Points:
         Creates the table with proper schema, indexes, and HNSW indexing for embeddings.
         """
         with Timer() as timer:
-            self._touch(verbose=verbose)
-        if verbose:
+            self._touch(verbose=self.dvs.v(verbose))
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(
                 f"Created table: '{dvs.DVS_POINTS_TABLE_NAME}' in {dur:.3f} ms"
@@ -58,13 +58,12 @@ class Points:
         Retrieve a single point from the database by its ID.
         Raises NotFoundError if the point doesn't exist.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             out = self._retrieve(
-                point_id, verbose=verbose, with_embedding=with_embedding
+                point_id, verbose=self.dvs.v(verbose), with_embedding=with_embedding
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Retrieved point: '{point_id}' in {dur:.3f} ms")
         return out
@@ -79,16 +78,17 @@ class Points:
         Create a single point in the database.
         The point must have a valid embedding vector before creation.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         point = (
             PointType.model_validate(point) if isinstance(point, typing.Dict) else point
         )
 
         with Timer() as timer:
-            points = self._bulk_create(points=[point], verbose=verbose, batch_size=1)
+            points = self._bulk_create(
+                points=[point], verbose=self.dvs.v(verbose), batch_size=1
+            )
         point = points[0]
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Created point: '{point.point_id}' in {dur:.3f} ms")
         return point
@@ -108,7 +108,6 @@ class Points:
         Create multiple points in the database efficiently using batches.
         All points must have valid embedding vectors before creation.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         points = [
             PointType.model_validate(p) if isinstance(p, typing.Dict) else p
             for p in points
@@ -116,10 +115,10 @@ class Points:
 
         with Timer() as timer:
             points = self._bulk_create(
-                points=points, verbose=verbose, batch_size=batch_size
+                points=points, verbose=self.dvs.v(verbose), batch_size=batch_size
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur, unit = (
                 (timer.duration, "s")
                 if timer.duration > 1.0
@@ -134,11 +133,10 @@ class Points:
         Delete a single point from the database by its ID.
         No error is raised if the point doesn't exist.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
-            self._remove(point_id, verbose=verbose)
+            self._remove(point_id, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Deleted point: '{point_id}' in {dur:.3f} ms")
 
@@ -160,7 +158,6 @@ class Points:
         List and paginate points with optional filtering by document_id and content_md5.
         Uses cursor-based pagination with point_id for efficient large result sets.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             out = self._list(
                 document_id=document_id,
@@ -170,10 +167,10 @@ class Points:
                 limit=limit,
                 order=order,
                 with_embedding=with_embedding,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur, unit = (
                 (timer.duration, "s")
                 if timer.duration > 1.0
@@ -210,7 +207,7 @@ class Points:
                 limit=limit,
                 order=order,
                 with_embedding=with_embedding,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
             has_more = points.has_more
             after = points.last_id
@@ -229,16 +226,15 @@ class Points:
         Count the number of points in the database with optional filtering.
         Returns the total count of points matching the criteria.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         with Timer() as timer:
             count = self._count(
                 document_id=document_id,
                 content_md5=content_md5,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Counted {count} points in {dur:.3f} ms")
 
@@ -250,7 +246,6 @@ class Points:
         """
         Check if a point with the given content_md5 exists in the database.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         with Timer() as timer:
             out = self._list(
@@ -261,9 +256,9 @@ class Points:
                 limit=1,
                 order="asc",
                 with_embedding=False,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Checked content_md5 in {dur:.3f} ms")
         return len(out.data) > 0
@@ -284,11 +279,11 @@ class Points:
             raise ValueError("Use force=True to drop table.")
 
         with Timer() as timer:
-            self._drop(verbose=verbose)
+            self._drop(verbose=self.dvs.v(verbose))
             if touch_after_drop:
-                self._touch(verbose=verbose)
+                self._touch(verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Dropped points in {dur:.3f} ms")
 
@@ -305,15 +300,14 @@ class Points:
         Remove outdated points for a document that don't match the current content hash.
         Cleans up old vector embeddings when document content changes.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             self._remove_outdated(
                 document_id=document_id,
                 content_md5=content_md5,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(
                 f"Deleted outdated points of document: '{document_id}' in {dur:.3f} ms"
@@ -332,16 +326,15 @@ class Points:
         Delete multiple points by point IDs, document IDs, or content hashes.
         Uses OR conditions between different identifier types.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             self._remove_many(
                 point_ids=point_ids,
                 document_ids=document_ids,
                 content_md5s=content_md5s,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Deleted points in {dur:.3f} ms")
 
@@ -352,7 +345,7 @@ class Points:
         Initialize the points table with extensions and vector similarity search indexes.
         """  # noqa: E501
         # Install JSON and VSS extensions
-        self.dvs.db.install_extensions(verbose=verbose)
+        self.dvs.db.install_extensions(verbose=self.dvs.v(verbose))
 
         # Create table
         with Timer() as timer:
@@ -391,7 +384,7 @@ class Points:
             f"{create_table_sql}",
             title=f"Creating table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return True
@@ -427,7 +420,7 @@ class Points:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Retrieving point with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         if result is None:
@@ -507,7 +500,7 @@ class Points:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
             title="Creating points with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return list(points)
@@ -530,7 +523,7 @@ class Points:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Deleting point with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return None
@@ -597,7 +590,7 @@ class Points:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Listing points with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         points = [PointType.model_validate(row) for row in results[:limit]]
@@ -650,7 +643,7 @@ class Points:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Counting points with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         count = result[0] if result else 0
@@ -672,7 +665,7 @@ class Points:
             f"{query}",
             title=f"Dropping table: '{dvs.DVS_POINTS_TABLE_NAME}' with SQL",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return None
@@ -700,7 +693,7 @@ class Points:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Removing outdated points with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return None
@@ -750,7 +743,7 @@ class Points:
             f"{query}\n" + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Removing points with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return None

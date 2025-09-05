@@ -51,7 +51,7 @@ class Nodes:
             create_table_sql,
             title=f"Creating table: '{dvs.DVS_NODES_TABLE_NAME}' with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         return True
@@ -78,7 +78,7 @@ class Nodes:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Retrieving node with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         if result is None:
@@ -113,7 +113,7 @@ class Nodes:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Retrieving node with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         if result is None:
@@ -136,7 +136,7 @@ class Nodes:
     ) -> NodeType:
         nodes = self.bulk_create(
             [node if isinstance(node, NodeType) else NodeType.model_validate(node)],
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
         return nodes[0]
 
@@ -165,7 +165,7 @@ class Nodes:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
             title="Creating nodes with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
         logger.info(f"✅ Created {len(nodes)} nodes.")
         return list(nodes)
@@ -225,7 +225,7 @@ class Nodes:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Listing documents with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         results = [
@@ -266,7 +266,7 @@ class Nodes:
                 before=before,
                 limit=limit,
                 order=order,
-                verbose=verbose,
+                verbose=self.dvs.v(verbose),
             )
             has_more = nodes.has_more
             current_after = nodes.last_id
@@ -302,7 +302,7 @@ class Nodes:
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
             title="Counting nodes with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
-            verbose=verbose,
+            verbose=self.dvs.v(verbose),
         )
 
         count = result[0] if result else 0
