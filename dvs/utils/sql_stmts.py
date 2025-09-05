@@ -39,7 +39,7 @@ SQL_STMT_GET_BY_DOC_IDS: Final[Text] = dedent(
 
 # SQL Create index
 SQL_STMT_CREATE_INDEX: Final[Text] = (
-    "CREATE INDEX idx_{table_name}_{column_name} ON {table_name} ({column_name});"
+    "CREATE INDEX idx_{table_name}_{column_name} ON {table_name} ({column_name})"
 )
 
 # SQL Create embedding index

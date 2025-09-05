@@ -8,7 +8,13 @@ import openai
 
 import dvs
 from dvs.types.edge import Edge as EdgeType
-from dvs.types.edge import RelationType
+from dvs.types.edge import (
+    RelationHasA,
+    RelationIsA,
+    RelationIsFrom,
+    RelationRelatedTo,
+    RelationType,
+)
 from dvs.types.paginations import Pagination
 from dvs.utils.debug_print import debug_print
 from dvs.utils.display import DISPLAY_SQL_PARAMS, display_sql_parameters
@@ -33,24 +39,41 @@ class Edges:
 
     def touch(self, *, verbose: bool | None = None) -> bool:
         with Timer() as timer:
-            create_table_sql = openapi_to_create_table_sql(
-                EdgeType.model_json_schema(),
-                table_name=dvs.DVS_EDGES_TABLE_NAME,
-                primary_key="edge_id",
-                unique_fields=[],
-                indexes=["edge_id", "relation", "from_node", "to_node"],
+            sqls: typing.List[typing.Text] = []
+            table_names_expr = ", ".join(
+                table_name
+                for table_name in [
+                    dvs.DVS_EDGES_IS_A_TABLE_NAME,
+                    dvs.DVS_EDGES_HAS_A_TABLE_NAME,
+                    dvs.DVS_EDGES_RELATED_TO_TABLE_NAME,
+                    dvs.DVS_EDGES_IS_FROM_TABLE_NAME,
+                ]
             )
+            for table_name in table_names_expr.split(","):
+                table_name = table_name.strip()
+                sqls.append(
+                    openapi_to_create_table_sql(
+                        EdgeType.model_json_schema(),
+                        table_name=table_name,
+                        primary_key="edge_id",
+                        unique_fields=[],
+                        indexes=["edge_id", "relation", "from_node", "to_node"],
+                    )
+                )
+            sql_stmt = ";\n".join(sqls)
+
             try:
-                self.dvs.conn.sql(create_table_sql)
+                self.dvs.conn.sql(sql_stmt)
+
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
-                    logger.debug(f"Table '{dvs.DVS_EDGES_TABLE_NAME}' already exists")
+                    logger.debug(f"Table {table_names_expr} already exists")
                 else:
                     raise e
 
         debug_print(
-            create_table_sql,
-            title=f"Creating table: '{dvs.DVS_EDGES_TABLE_NAME}' with SQL:",
+            sql_stmt,
+            title=f"Creating table: {table_names_expr} with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
@@ -60,10 +83,24 @@ class Edges:
     def retrieve(
         self, edge_id: typing.Text, *, verbose: bool | None = None
     ) -> EdgeType:
-        query = f"SELECT {self.columns_expr} FROM {dvs.DVS_EDGES_TABLE_NAME}"
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query).fetchone()
+            for table_name in [
+                dvs.DVS_EDGES_IS_A_TABLE_NAME,
+                dvs.DVS_EDGES_HAS_A_TABLE_NAME,
+                dvs.DVS_EDGES_RELATED_TO_TABLE_NAME,
+                dvs.DVS_EDGES_IS_FROM_TABLE_NAME,
+            ]:
+                query = f"SELECT {self.columns_expr} FROM {table_name}"
+                result = self.dvs.conn.execute(query).fetchone()
+                if result is not None:
+                    break
+            else:
+                raise openai.NotFoundError(
+                    f"Edge with ID '{edge_id}' not found.",
+                    response=dummy_httpx_response(404, b"Not Found"),
+                    body=None,
+                )
 
         debug_print(
             f"{query}",
@@ -103,33 +140,46 @@ class Edges:
             return []
 
         placeholders = ", ".join(["?" for _ in self.columns])
-        parameters: typing.List[typing.Tuple[typing.Any, ...]] = [
-            tuple(getattr(edge, c) for c in self.columns) for edge in edges
-        ]
-
-        query = (
-            f"INSERT INTO {dvs.DVS_EDGES_TABLE_NAME} ({self.columns_expr}) "
-            + f"VALUES ({placeholders})"
-        )
 
         # Create nodes
+        queries: typing.List[typing.Text] = []
         with Timer() as timer:
             logger.debug(f"🔨 Creating {len(edges)} edges ...")
-            self.dvs.conn.executemany(query, parameters)
+            for edge_type, edge_table_name in [
+                (RelationIsA, dvs.DVS_EDGES_IS_A_TABLE_NAME),
+                (RelationHasA, dvs.DVS_EDGES_HAS_A_TABLE_NAME),
+                (RelationRelatedTo, dvs.DVS_EDGES_RELATED_TO_TABLE_NAME),
+                (RelationIsFrom, dvs.DVS_EDGES_IS_FROM_TABLE_NAME),
+            ]:
+                batch_edges = [edge for edge in edges if edge.relation == edge_type]
+                parameters: typing.List[typing.Tuple[typing.Any, ...]] = [
+                    tuple(getattr(edge, c) for c in self.columns)
+                    for edge in batch_edges
+                ]
+                query = (
+                    f"INSERT INTO {edge_table_name} ({self.columns_expr}) "
+                    + f"VALUES ({placeholders})"
+                )
+                self.dvs.conn.executemany(query, parameters)
+
+                queries.append(
+                    f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}"  # noqa: E501)
+                )
 
         debug_print(
-            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
+            "\n\n".join(queries),
             title="Creating edges with SQL:",
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
+
         logger.info(f"✅ Created {len(edges)} edges.")
         return list(edges)
 
     def list(
         self,
         *,
-        relation: typing.Optional[RelationType] = None,
+        relation: RelationType,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
@@ -138,16 +188,20 @@ class Edges:
         order: typing.Literal["asc", "desc"] = "asc",
         verbose: bool | None = None,
     ) -> Pagination[EdgeType]:
-        query = f"SELECT {self.columns_expr} FROM {dvs.DVS_EDGES_TABLE_NAME}\n"
+        table_name = {
+            RelationIsA: dvs.DVS_EDGES_IS_A_TABLE_NAME,
+            RelationHasA: dvs.DVS_EDGES_HAS_A_TABLE_NAME,
+            RelationRelatedTo: dvs.DVS_EDGES_RELATED_TO_TABLE_NAME,
+            RelationIsFrom: dvs.DVS_EDGES_IS_FROM_TABLE_NAME,
+        }[relation]
+        query = f"SELECT {self.columns_expr} FROM {table_name}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
-        # Find edges with relation.
-        # Or from_node_label, and to_node_label containing the substring
-        # with insensitive case
-        if relation is not None:
-            where_clauses.append("relation = ?")
-            parameters.append(relation)
+        # Find edges from_node_label, and to_node_label containing the substring
+        # in insensitive case
+        where_clauses.append("relation = ?")
+        parameters.append(relation)
         if from_node_label_contains is not None:
             where_clauses.append("from_node ILIKE ?")
             parameters.append(f"%{from_node_label_contains}%")
@@ -211,7 +265,7 @@ class Edges:
     def gen(
         self,
         *,
-        relation: typing.Optional[RelationType] = None,
+        relation: RelationType,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
@@ -241,18 +295,21 @@ class Edges:
     def count(
         self,
         *,
-        relation: typing.Optional[RelationType] = None,
+        relation: RelationType,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
         verbose: bool | None = None,
     ) -> int:
-        query = f"SELECT COUNT(*) FROM {dvs.DVS_EDGES_TABLE_NAME}\n"
+        table_name = {
+            RelationIsA: dvs.DVS_EDGES_IS_A_TABLE_NAME,
+            RelationHasA: dvs.DVS_EDGES_HAS_A_TABLE_NAME,
+            RelationRelatedTo: dvs.DVS_EDGES_RELATED_TO_TABLE_NAME,
+            RelationIsFrom: dvs.DVS_EDGES_IS_FROM_TABLE_NAME,
+        }[relation]
+        query = f"SELECT COUNT(*) FROM {table_name}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
-        if relation is not None:
-            where_clauses.append("relation = ?")
-            parameters.append(relation)
         if from_node_label_contains is not None:
             where_clauses.append("from_node ILIKE ?")
             parameters.append(f"%{from_node_label_contains}%")

@@ -1,14 +1,24 @@
 import functools
+import logging
 import textwrap
 import typing
 
 import dvs
+from dvs.types.edge import (
+    RelationHasA,
+    RelationIsA,
+    RelationIsFrom,
+    RelationRelatedTo,
+    RelationType,
+)
 from dvs.utils.debug_print import debug_print
 from dvs.utils.timer import Timer
 
 if typing.TYPE_CHECKING:
     from dvs.db.graph.edges.api import Edges
     from dvs.db.graph.nodes.api import Nodes
+
+logger = logging.getLogger(__name__)
 
 
 class Graph:
@@ -27,13 +37,26 @@ class Graph:
                     {dvs.DVS_NODES_TABLE_NAME}
                 )
                 EDGE TABLES (
-                    {dvs.DVS_EDGES_TABLE_NAME}
-                    SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
-                    DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
-                    LABEL relation
+                    {dvs.DVS_EDGES_IS_A_TABLE_NAME}
+                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        LABEL {RelationIsA},
+                    {dvs.DVS_EDGES_HAS_A_TABLE_NAME}
+                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        LABEL {RelationHasA},
+                    {dvs.DVS_EDGES_RELATED_TO_TABLE_NAME}
+                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        LABEL {RelationRelatedTo},
+                    {dvs.DVS_EDGES_IS_FROM_TABLE_NAME}
+                        SOURCE KEY (from_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        DESTINATION KEY (to_node) REFERENCES {dvs.DVS_NODES_TABLE_NAME} (node_id)
+                        LABEL {RelationIsFrom}
                 )
                 """  # noqa: E501
             )
+
             self.dvs.conn.execute(create_table_sql)
 
         debug_print(
@@ -42,7 +65,7 @@ class Graph:
             footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
+        logger.info(f"✅ Created property graph: '{dvs.DVS_GRAPH_TABLE_NAME}'")
         return True
 
     @functools.cached_property

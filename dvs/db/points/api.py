@@ -367,7 +367,7 @@ class Points:
             ).strip()
             create_table_sql = (
                 SQL_STMT_INSTALL_EXTENSIONS
-                + f"\n{create_table_sql}\n"
+                + f"\n{create_table_sql};\n"
                 #
                 + f"\n{SQL_STMT_SET_HNSW_EXPERIMENTAL_PERSISTENCE}\n"
                 # Required for HNSW index
