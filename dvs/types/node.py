@@ -23,9 +23,13 @@ class Node(pydantic.BaseModel):
 
     @pydantic.model_validator(mode="after")
     def validate_label(self) -> typing.Self:
+        from dvs.utils.format_string import sanitize_xml_string
+
         _label = str_or_none(self.label)
         if _label is None:
             raise ValueError("Label is required")
         else:
             self.label = _label
+
+        self.label = sanitize_xml_string(self.label)
         return self

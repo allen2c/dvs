@@ -1,5 +1,6 @@
 import typing
 
+import pydantic
 from ner_agent import Triplet as NerTriplet
 
 if typing.TYPE_CHECKING:
@@ -10,6 +11,14 @@ if typing.TYPE_CHECKING:
 class Triplet(NerTriplet):
     relation: typing.Literal["is_a", "has_a", "related_to", "is_from"]
     document_id: str
+
+    @pydantic.model_validator(mode="after")
+    def sanitize_subject_and_object(self) -> typing.Self:
+        from dvs.utils.format_string import sanitize_xml_string
+
+        self.subject = sanitize_xml_string(self.subject)
+        self.object = sanitize_xml_string(self.object)
+        return self
 
     def to_nodes_edges(
         self,
