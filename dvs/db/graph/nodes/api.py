@@ -40,7 +40,7 @@ class Nodes:
                 indexes=["node_id", "label"],
             )
             try:
-                self.dvs.conn.sql(create_table_sql)
+                self.dvs.new_connection().cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(f"Table '{dvs.DVS_NODES_TABLE_NAME}' already exists")
@@ -67,7 +67,12 @@ class Nodes:
         parameters = [node_id]
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -97,7 +102,12 @@ class Nodes:
         parameters = [label]
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -149,7 +159,7 @@ class Nodes:
         # Create nodes
         with Timer() as timer:
             logger.debug(f"🔨 Creating {len(nodes)} nodes ...")
-            self.dvs.conn.executemany(query, parameters)
+            self.dvs.new_connection().cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
@@ -204,7 +214,12 @@ class Nodes:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
-            results = self.dvs.conn.execute(query, parameters).fetchall()
+            results = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchall()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -276,7 +291,12 @@ class Nodes:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",

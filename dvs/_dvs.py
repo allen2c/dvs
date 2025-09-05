@@ -53,10 +53,9 @@ class DVS:
     def duckdb_path(self) -> pathlib.Path:
         return self.settings.duckdb_path
 
-    @property
-    def conn(self) -> duckdb.DuckDBPyConnection:
+    def new_connection(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
         """Always use a new duckdb connection."""
-        conn = duckdb.connect(self.duckdb_path)
+        conn = duckdb.connect(self.duckdb_path, read_only=read_only)
         return conn
 
     def add(
@@ -210,7 +209,7 @@ class DVS:
             embedding_dimensions=self.db_manifest.embedding_dimensions,
             documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
             points_table_name=dvs.DVS_POINTS_TABLE_NAME,
-            conn=self.conn,
+            conn=self.new_connection(read_only=True),
             with_embedding=search_req.with_embedding,
             console=self.settings.console,
         )
@@ -228,6 +227,9 @@ class DVS:
         from dvs.tokens import Tokens
 
         return Tokens(self)
+
+    def v(self, verbose: bool | None = None) -> bool:
+        return self.verbose if verbose is None else verbose
 
     def _ensure_dvs_settings(
         self, settings: typing.Union[pathlib.Path, str] | Settings

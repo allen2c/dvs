@@ -380,7 +380,7 @@ class Points:
             ).strip()
 
             try:
-                self.dvs.conn.sql(create_table_sql)
+                self.dvs.new_connection().cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(f"Table '{dvs.DVS_POINTS_TABLE_NAME}' already exists")
@@ -416,7 +416,12 @@ class Points:
         parameters = [point_id]
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -496,7 +501,7 @@ class Points:
                 query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
 
                 # Create points
-                self.dvs.conn.executemany(query, parameters)
+                self.dvs.new_connection().cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
@@ -519,7 +524,7 @@ class Points:
         parameters = [point_id]
 
         with Timer() as timer:
-            self.dvs.conn.execute(query, parameters)
+            self.dvs.new_connection().cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -582,7 +587,10 @@ class Points:
                     column: json.loads(value) if column == "metadata" else value
                     for column, value in zip(columns, row)
                 }
-                for row in self.dvs.conn.execute(query, parameters).fetchall()
+                for row in self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchall()
             ]
 
         debug_print(
@@ -631,7 +639,12 @@ class Points:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -653,7 +666,7 @@ class Points:
 
         # Drop table
         with Timer() as timer:
-            self.dvs.conn.sql(query)
+            self.dvs.new_connection().cursor().sql(query)
 
         debug_print(
             f"{query}",
@@ -681,7 +694,7 @@ class Points:
 
         # Remove outdated points
         with Timer() as timer:
-            self.dvs.conn.execute(query, parameters)
+            self.dvs.new_connection().cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -731,7 +744,7 @@ class Points:
 
         # Remove points
         with Timer() as timer:
-            self.dvs.conn.execute(query, parameters)
+            self.dvs.new_connection().cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n" + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",

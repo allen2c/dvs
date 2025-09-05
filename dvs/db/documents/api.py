@@ -279,7 +279,7 @@ class Documents:
             )
 
             try:
-                self.dvs.conn.sql(create_table_sql)
+                self.dvs.new_connection().cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(
@@ -316,7 +316,12 @@ class Documents:
         parameters = [document_id]
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
             if result is None:
                 raise NotFoundError(
@@ -365,7 +370,7 @@ class Documents:
 
         with Timer() as timer:
             # Create documents
-            self.dvs.conn.executemany(query, parameters)
+            self.dvs.new_connection().cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
@@ -385,7 +390,7 @@ class Documents:
 
         with Timer() as timer:
             # Delete document
-            self.dvs.conn.execute(query, parameters)
+            self.dvs.new_connection().cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -442,7 +447,12 @@ class Documents:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
-            results = self.dvs.conn.execute(query, parameters).fetchall()
+            results = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchall()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -498,7 +508,12 @@ class Documents:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -520,7 +535,7 @@ class Documents:
 
         with Timer() as timer:
             # Drop table
-            self.dvs.conn.sql(query)
+            self.dvs.new_connection().cursor().sql(query)
 
         debug_print(
             f"{query}",

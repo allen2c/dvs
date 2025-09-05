@@ -1,9 +1,12 @@
 import functools
 import typing
 
+import duckdb
+
 import dvs
 from dvs.utils.debug_print import debug_print
 from dvs.utils.sql_stmts import SQL_STMT_INSTALL_EXTENSIONS, SQL_STMT_SHOW_TABLES
+from dvs.utils.timer import Timer
 
 if typing.TYPE_CHECKING:
     from dvs.db.documents.api import Documents
@@ -38,13 +41,15 @@ class DB:
         """
         verbose = self.dvs.verbose if verbose is None else verbose
 
+        with Timer() as timer:
+            self.dvs.new_connection().cursor().sql(SQL_STMT_INSTALL_EXTENSIONS)
+
         debug_print(
             SQL_STMT_INSTALL_EXTENSIONS,
             title="Installing extensions with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
             verbose=verbose,
         )
-
-        self.dvs.conn.sql(SQL_STMT_INSTALL_EXTENSIONS)
 
         return True
 
@@ -52,10 +57,19 @@ class DB:
         """
         Return the names of all tables in the database.
         """
-        res: typing.List[typing.Tuple[typing.Text]] = self.dvs.conn.execute(
-            SQL_STMT_SHOW_TABLES
-        ).fetchall()
-        return tuple(r[0] for r in res)
+        try:
+            res: typing.List[typing.Tuple[typing.Text]] = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(SQL_STMT_SHOW_TABLES)
+                .fetchall()
+            )
+            return tuple(r[0] for r in res)
+        except duckdb.IOException as e:
+            if "database does not exist" in str(e).lower():
+                return tuple()
+            else:
+                raise e
 
     @functools.cached_property
     def manifest(self) -> "Manifest":

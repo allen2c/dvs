@@ -34,9 +34,9 @@ class Graph:
         self.edges.touch(verbose=verbose)
 
         with Timer() as timer:
-            conn = self.dvs.conn
+            conn = self.dvs.new_connection()
             # First, execute the extension installation
-            conn.execute("LOAD duckpgq;")
+            conn.cursor().execute(SQL_STMT_LOAD_DUCKPGQ)
 
             # Then, create the property graph
             create_table_sql = textwrap.dedent(
@@ -107,7 +107,7 @@ class Graph:
             if relation is None
             else [relation]
         )
-        conn = self.dvs.conn
+        conn = self.dvs.new_connection()
         conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         def run_query(

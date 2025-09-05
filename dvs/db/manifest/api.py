@@ -23,16 +23,8 @@ class Manifest:
         Create the manifest table if it does not exist.
         Returns True when table creation is completed successfully.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
-        with Timer() as timer:
-            self._touch(verbose=verbose)
-
-        if verbose:
-            dur = timer.duration * 1000
-            logger.debug(
-                f"Created table: '{dvs.DVS_MANIFEST_TABLE_NAME}' in {dur:.3f} ms"
-            )
+        self._touch(verbose=verbose)
 
         return True
 
@@ -100,7 +92,7 @@ class Manifest:
             ).strip()
 
             try:
-                self.dvs.conn.sql(create_table_sql)
+                self.dvs.new_connection().cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(
@@ -129,7 +121,12 @@ class Manifest:
         query = f"SELECT {columns_expr} FROM {dvs.DVS_MANIFEST_TABLE_NAME}"
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}",
@@ -166,7 +163,7 @@ class Manifest:
         )
 
         with Timer() as timer:
-            self.dvs.conn.executemany(query, parameters)
+            self.dvs.new_connection().cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -184,7 +181,7 @@ class Manifest:
         query = f"DROP TABLE IF EXISTS {dvs.DVS_MANIFEST_TABLE_NAME}"
 
         with Timer() as timer:
-            self.dvs.conn.execute(query)
+            self.dvs.new_connection().cursor().execute(query)
 
         debug_print(
             f"{query}",

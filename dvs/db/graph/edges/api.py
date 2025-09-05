@@ -70,7 +70,7 @@ class Edges:
             sql_stmt = ";\n".join(sqls)
 
             try:
-                self.dvs.conn.sql(sql_stmt)
+                self.dvs.new_connection().cursor().sql(sql_stmt)
 
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
@@ -99,7 +99,12 @@ class Edges:
                 dvs.DVS_EDGES_IS_FROM_TABLE_NAME,
             ]:
                 query = f"SELECT {self.columns_expr} FROM {table_name}"
-                result = self.dvs.conn.execute(query).fetchone()
+                result = (
+                    self.dvs.new_connection(read_only=True)
+                    .cursor()
+                    .execute(query)
+                    .fetchone()
+                )
                 if result is not None:
                     break
             else:
@@ -167,7 +172,7 @@ class Edges:
                     f"INSERT INTO {edge_table_name} ({self.columns_expr}) "
                     + f"VALUES ({placeholders})"
                 )
-                self.dvs.conn.executemany(query, parameters)
+                self.dvs.new_connection().cursor().executemany(query, parameters)
 
                 queries.append(
                     f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}"  # noqa: E501)
@@ -249,7 +254,12 @@ class Edges:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
-            results = self.dvs.conn.execute(query, parameters).fetchall()
+            results = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchall()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -348,7 +358,12 @@ class Edges:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = self.dvs.conn.execute(query, parameters).fetchone()
+            result = (
+                self.dvs.new_connection(read_only=True)
+                .cursor()
+                .execute(query, parameters)
+                .fetchone()
+            )
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
