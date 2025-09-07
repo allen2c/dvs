@@ -308,6 +308,280 @@ class DVS(DVSMixin):
 
         return results
 
+    async def graph_rag_search_vector_expansion(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        graph_expansion_depth: int = 1,
+        vector_weight: float = 0.7,
+        graph_weight: float = 0.3,
+        with_embedding: bool = False,
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
+        """
+        Graph-RAG Strategy 1: Vector + Graph Expansion
+
+        Original query → Vector search → Find relevant nodes → Graph expansion → Re-scoring
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            graph_expansion_depth: Graph expansion depth
+            vector_weight: Vector similarity weight
+            graph_weight: Graph relationship weight
+            with_embedding: Whether to include embedding
+            verbose: Whether to show detailed information
+
+        Returns:
+            Search results list [(Point, Document, relevance_score), ...]
+        """  # noqa: E501
+        verbose = self.verbose if verbose is None else verbose
+
+        # Step 1: Vector search - Find most relevant documents
+        initial_results = await self.search(
+            query=query,
+            top_k=top_k * 2,  # Expand candidate set
+            with_embedding=with_embedding,
+            verbose=verbose,
+        )
+
+        if not initial_results:
+            return []
+
+        # Step 2: Find corresponding document nodes from document IDs
+        document_ids = [doc.document_id for _, doc, _ in initial_results]
+        document_nodes = []
+
+        for doc_id in document_ids:
+            try:
+                # Try to find corresponding document node (label = document_id)
+                doc_node = self.db.graph.nodes.retrieve(doc_id, verbose=False)
+                document_nodes.append(doc_node)
+            except Exception:
+                # Skip if corresponding node not found
+                continue
+
+        # Step 3: Find related entity nodes through "is_from" relationship
+        related_entities = set()
+        for doc_node in document_nodes:
+            try:
+                # Find all entity nodes connected to this document
+                neighbors = self.db.graph.get_neighbors(
+                    from_node_id_or_label=doc_node.node_id,
+                    relation="is_from",
+                    limit=10,
+                    verbose=False,
+                )
+
+                # Collect entity node IDs
+                for _, _, entity_node in neighbors:
+                    if entity_node.kind == "entity":
+                        related_entities.add(entity_node.node_id)
+            except Exception:
+                continue
+
+        # Step 4: Graph expansion on these entity nodes to find more related documents
+        expanded_document_ids = set(document_ids)
+
+        if graph_expansion_depth > 0:
+            for entity_id in list(related_entities)[:20]:  # Limit processing count
+                try:
+                    # Find all document nodes connected to this entity
+                    neighbors = self.db.graph.get_neighbors(
+                        to_node_id_or_label=entity_id,
+                        relation="is_from",
+                        limit=5,
+                        verbose=False,
+                    )
+
+                    # Collect new document IDs
+                    for _, _, doc_node in neighbors:
+                        if doc_node.kind == "document":
+                            expanded_document_ids.add(doc_node.node_id)
+                except Exception:
+                    continue
+
+        # Step 5: Re-vector search on expanded document collection
+        expanded_candidates = []
+        for doc_id in expanded_document_ids:
+            try:
+                # Get all points for the document
+                points = self.db.points.gen(document_id=doc_id, limit=10)
+                for point in points:
+                    if point.embedding:
+                        expanded_candidates.append(point)
+            except Exception:
+                continue
+
+        # Fall back to original results if no candidates found
+        if not expanded_candidates:
+            return initial_results[:top_k]
+
+        # Step 6: Calculate vector similarity for candidate points
+        query_vector = (
+            await SearchRequest.to_vectors(
+                [SearchRequest(query=query, top_k=1)],
+                model=self.model,
+                model_settings=self.model_settings,
+            )
+        )[0]
+
+        scored_candidates = []
+        for point in expanded_candidates:
+            try:
+                point_vector = point.to_python()
+                # Calculate cosine similarity
+                similarity = self._cosine_similarity(query_vector, point_vector)
+                scored_candidates.append((point, similarity))
+            except Exception:
+                continue
+
+        # Step 7: Calculate combined score (vector similarity + graph relevance)
+        final_results = []
+        for point, vector_score in scored_candidates:
+            try:
+                doc = self.db.documents.retrieve(point.document_id, verbose=False)
+
+                # Calculate graph relevance: based on distance to original
+                # query-related documents
+                graph_score = self._calculate_graph_relevance(
+                    point.document_id, document_ids, related_entities
+                )
+
+                # Combined scoring
+                combined_score = (
+                    vector_weight * vector_score + graph_weight * graph_score
+                )
+
+                final_results.append((point, doc, combined_score))
+
+            except Exception:
+                continue
+
+        # Step 8: Sort by combined score and return top-k
+        final_results.sort(key=lambda x: x[2], reverse=True)
+        return final_results[:top_k]
+
+    async def graph_rag_search_graph_guided(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        relation_types: list[str] | None = None,
+        centrality_threshold: float = 0.5,
+        with_embedding: bool = False,
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
+        """
+        Graph-RAG Strategy 2: Graph-Guided Vector Search
+
+        Query → Graph search popular nodes → Vector search on these nodes → Combined scoring  # noqa
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            relation_types: Graph relation type filters
+            centrality_threshold: Centrality threshold
+            with_embedding: Whether to include embedding
+            verbose: Whether to show detailed information
+
+        Returns:
+            Search results list [(Point, Document, relevance_score), ...]
+        """
+        # TODO: Implement Strategy 2 - Graph-Guided Vector Search
+        raise NotImplementedError("Strategy 2 not yet implemented")
+
+    async def graph_rag_search_hybrid_scoring(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        vector_weight: float = 0.5,
+        graph_importance_weight: float = 0.3,
+        graph_distance_weight: float = 0.2,
+        with_embedding: bool = False,
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
+        """
+        Graph-RAG Strategy 3: Hybrid Scoring
+
+        Vector similarity + Graph importance + Graph distance = Combined scoring
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            vector_weight: Vector similarity weight
+            graph_importance_weight: Graph importance weight
+            graph_distance_weight: Graph distance weight
+            with_embedding: Whether to include embedding
+            verbose: Whether to show detailed information
+
+        Returns:
+            Search results list [(Point, Document, relevance_score), ...]
+        """
+        # TODO: Implement Strategy 3 - Hybrid Scoring
+        raise NotImplementedError("Strategy 3 not yet implemented")
+
+    async def graph_rag_search_iterative_refinement(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        max_iterations: int = 3,
+        refinement_threshold: float = 0.1,
+        with_embedding: bool = False,
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
+        """
+        Graph-RAG Strategy 4: Iterative Refinement
+
+        Initial search → Expand query based on results → Search again → Repeat until convergence  # noqa
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            max_iterations: Maximum number of iterations
+            refinement_threshold: Convergence threshold
+            with_embedding: Whether to include embedding
+            verbose: Whether to show detailed information
+
+        Returns:
+            Search results list [(Point, Document, relevance_score), ...]
+        """
+        # TODO: Implement Strategy 4 - Iterative Refinement
+        raise NotImplementedError("Strategy 4 not yet implemented")
+
+    async def graph_rag_search_context_aware(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        context_similarity_threshold: float = 0.7,
+        max_expansion_steps: int = 2,
+        with_embedding: bool = False,
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
+        """
+        Graph-RAG Strategy 5: Context-Aware Expansion
+
+        Vector search → Analyze result relationships → Expand search scope based on relationships
+        → Filter irrelevant results  # noqa
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            context_similarity_threshold: Context similarity threshold
+            max_expansion_steps: Maximum expansion steps
+            with_embedding: Whether to include embedding
+            verbose: Whether to show detailed information
+
+        Returns:
+            Search results list [(Point, Document, relevance_score), ...]
+        """
+        # TODO: Implement Strategy 5 - Context-Aware Expansion
+        raise NotImplementedError("Strategy 5 not yet implemented")
+
     @functools.cached_property
     def db(self) -> "DB":
         from dvs.db.api import DB
@@ -323,3 +597,66 @@ class DVS(DVSMixin):
     def v(self, verbose: bool | None = None) -> bool:
         """Get verbosity setting, with optional override."""
         return self.verbose if verbose is None else verbose
+
+    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        import math
+
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        norm1 = math.sqrt(sum(a * a for a in vec1))
+        norm2 = math.sqrt(sum(b * b for b in vec2))
+
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+
+        return dot_product / (norm1 * norm2)
+
+    def _calculate_graph_relevance(
+        self,
+        target_doc_id: str,
+        original_doc_ids: list[str],
+        related_entities: set[str],
+    ) -> float:
+        """Calculate graph relevance for a document"""
+        # Give higher score if document is in original search results
+        if target_doc_id in original_doc_ids:
+            return 1.0
+
+        # Calculate graph distance to original documents
+        min_distance = float("inf")
+
+        try:
+            # Try to find target document node
+            target_node = self.db.graph.nodes.retrieve(target_doc_id, verbose=False)
+
+            for original_doc_id in original_doc_ids:
+                try:
+                    original_node = self.db.graph.nodes.retrieve(
+                        original_doc_id, verbose=False
+                    )
+
+                    # Calculate shortest path distance
+                    paths = self.db.graph.get_shortest_paths(
+                        from_node_id_or_label=original_node.node_id,
+                        to_node_id_or_label=target_node.node_id,
+                        limit=1,
+                        verbose=False,
+                    )
+
+                    if paths:
+                        distance = paths[0][2]  # Distance is in third position
+                        min_distance = min(min_distance, distance)
+
+                except Exception:
+                    continue
+
+        except Exception:
+            return 0.1  # Default low score
+
+        # Higher score for closer distance
+        if min_distance == float("inf"):
+            return 0.1
+        elif min_distance == 0:
+            return 1.0
+        else:
+            return max(0.1, 1.0 / (min_distance + 1))

@@ -111,7 +111,7 @@ async def main():
     graph_path = dump_graph(
         graph, data_root.joinpath(f"{graph_stem_name}.gexf"), format="gexf"
     )
-    graph = load_graph(graph_path, format="gexf")
+    graph = load_graph(graph_path, format="gexf")  # noqa
     console.log(f"Built Graph: {graph_path}")
 
     # --- Step 3.5: Read Graph from file ---
@@ -138,15 +138,17 @@ async def main():
     peek_edge = head_edges[0]
     print(f"Peek Edge: {peek_edge}")
 
-    results = dvs_client.db.graph.get_neighbors(peek_edge.from_node_id)
+    results = dvs_client.db.graph.get_neighbors(peek_edge.from_node_id, limit=3)
     print(f"There are {len(results)} neighbors by {peek_edge.from_node_id=}")
 
-    results = dvs_client.db.graph.get_shortest_paths(peek_edge.from_node_id)
+    results = dvs_client.db.graph.get_shortest_paths(peek_edge.from_node_id, limit=3)
     print(f"There are {len(results)} shortest paths by {peek_edge.from_node_id=}")
     for result in results:
         print(f"Distance: {result[-1]}, From: {result[0].label}, To: {result[1].label}")
 
-    results = dvs_client.db.graph.local_clustering_coefficient(relation="related_to")
+    results = dvs_client.db.graph.local_clustering_coefficient(
+        relation="related_to", limit=3
+    )
     print(f"There are {len(results)} local clustering coefficients")
     for result in results:
         print(
@@ -154,7 +156,9 @@ async def main():
             + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=False)}"
         )
 
-    results = dvs_client.db.graph.weakly_connected_component(relation="related_to")
+    results = dvs_client.db.graph.weakly_connected_component(
+        relation="related_to", limit=3
+    )
     print(f"There are {len(results)} weakly connected components")
     for result in results:
         print(
@@ -162,13 +166,45 @@ async def main():
             + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=False)}"
         )
 
-    results = dvs_client.db.graph.pagerank(relation="related_to")
+    results = dvs_client.db.graph.pagerank(relation="related_to", limit=3)
     print(f"There are {len(results)} pageranks")
     for result in results:
         print(
             f"Pagerank: {result[1]}, "
             + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=False)}"
         )
+
+    # --- Step 6: Graph-RAG Search Demo ---
+    console.rule("[bold blue]Step 6: Graph-RAG Search Demo[/bold blue]")
+
+    # Compare traditional RAG vs Graph-RAG search results
+    query = "artificial intelligence"
+
+    console.rule("[bold yellow]Traditional RAG Search[/bold yellow]")
+    traditional_results = await dvs_client.search(query, top_k=3, verbose=True)
+    for i, (point, doc, score) in enumerate(traditional_results, 1):
+        print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
+        print(f"   Content: {doc.content[:100]}...")
+
+    console.rule("[bold green]Graph-RAG Search (Strategy 1)[/bold green]")
+    graph_rag_results = await dvs_client.graph_rag_search_vector_expansion(
+        query,
+        top_k=3,
+        graph_expansion_depth=1,
+        vector_weight=0.7,
+        graph_weight=0.3,
+        verbose=True,
+    )
+
+    for i, (point, doc, score) in enumerate(graph_rag_results, 1):
+        print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
+        print(f"   Content: {doc.content[:100]}...")
+
+    console.rule("[bold cyan]Comparison Summary[/bold cyan]")
+    print("Graph-RAG can find:")
+    print("• Documents connected through entity relationships")
+    print("• Semantically related content via graph traversal")
+    print("• Better context by considering document interconnections")
 
 
 if __name__ == "__main__":
