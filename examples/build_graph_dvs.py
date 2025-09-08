@@ -25,7 +25,7 @@ from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
 from dvs.utils.loads_graph import load_graph
 
-VERBOSE = True
+VERBOSE = False
 MAX_CONCURRENCY = 4
 ENABLE_GRAPH = True
 
@@ -163,7 +163,7 @@ async def main():
     for result in results:
         print(
             f"Weakly Connected Component: {result[1]}, "
-            + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=False)}"
+            + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=VERBOSE)}"
         )
 
     results = dvs_client.db.graph.pagerank(relation="related_to", limit=3)
@@ -171,7 +171,7 @@ async def main():
     for result in results:
         print(
             f"Pagerank: {result[1]}, "
-            + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=False)}"
+            + f"Node: {dvs_client.db.graph.nodes.retrieve(result[0],verbose=VERBOSE)}"
         )
 
     # --- Step 6: Graph-RAG Search Demo ---
@@ -181,7 +181,7 @@ async def main():
     query: str = "Where are Michelin restaurants?"
 
     console.rule("[bold yellow]Traditional RAG Search[/bold yellow]")
-    traditional_results = await dvs_client.search(query, top_k=3, verbose=True)
+    traditional_results = await dvs_client.search(query, top_k=3, verbose=VERBOSE)
     for i, (point, doc, score) in enumerate(traditional_results, 1):
         print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
         print(f"   Content: {doc.content[:100]}...")
@@ -193,19 +193,8 @@ async def main():
         graph_expansion_depth=1,
         vector_weight=0.7,
         graph_weight=0.3,
-        verbose=True,
+        verbose=VERBOSE,
     )
-    print()
-    print()
-    print()
-    print()
-    print()
-    print(graph_rag_results)
-    print()
-    print()
-    print()
-    print()
-    print()
 
     for i, (point, doc, score) in enumerate(graph_rag_results, 1):
         print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
@@ -223,7 +212,7 @@ async def main():
 
     print("🎯 Strategy 2 Flow:")
     print("   Query → PageRank → Important Nodes → Vector Search → Combined Scoring")
-    print()
+    print("")
 
     # Test different centrality thresholds
     thresholds = [0.3, 0.5, 0.7]
@@ -236,7 +225,7 @@ async def main():
 
         try:
             results = await dvs_client.graph_rag_search_graph_guided(
-                query=query, top_k=3, centrality_threshold=threshold, verbose=True
+                query=query, top_k=3, centrality_threshold=threshold, verbose=VERBOSE
             )
 
             strategy2_results[threshold] = results
@@ -250,25 +239,25 @@ async def main():
             print(f"⚠️ Error with threshold {threshold}: {e}")
             strategy2_results[threshold] = []
 
-        print()
+        print("")
 
     # --- Step 8: Strategy Comparison ---
     console.rule("[bold green]Step 8: Strategy Comparison[/bold green]")
 
     print("🔍 Comparison of all strategies:")
-    print()
+    print("")
 
     # Traditional search results
     print("1️⃣ Traditional Vector Search:")
     for i, (point, doc, score) in enumerate(traditional_results, 1):
         print(f"   {i}. {doc.name}: {score:.3f}")
-    print()
+    print("")
 
     # Strategy 1 results
     print("2️⃣ Graph-RAG Strategy 1 (Vector + Graph Expansion):")
     for i, (point, doc, score) in enumerate(graph_rag_results, 1):
         print(f"   {i}. {doc.name}: {score:.3f}")
-    print()
+    print("")
 
     # Strategy 2 results for different thresholds
     for threshold, results in strategy2_results.items():
@@ -276,7 +265,7 @@ async def main():
             print(f"3️⃣ Graph-RAG Strategy 2 (Threshold {threshold}):")
             for i, (point, doc, score) in enumerate(results, 1):
                 print(f"   {i}. {doc.name}: {score:.3f}")
-            print()
+            print("")
 
     # --- Step 9: Strategy 2 Deep Analysis ---
     console.rule("[bold purple]Step 9: Strategy 2 Deep Analysis[/bold purple]")
@@ -316,7 +305,7 @@ async def main():
     for insight in insights:
         print(f"💡 {insight}")
 
-    print()
+    print("")
     print("✨ Demo completed! Strategy 2 showcases how graphs can intelligently")
     print("   guide vector search to find more relevant and authoritative content.")
 

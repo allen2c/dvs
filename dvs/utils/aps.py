@@ -1,11 +1,16 @@
+import asyncio
+import hashlib
 import logging
+import pathlib
 import typing
 
 import agents
+import cachetic
+import pydantic
 from rich.pretty import pretty_repr
 
 if typing.TYPE_CHECKING:
-    from aps_agent import APSAgent
+    from aps_agent import APSAgent, APSResult
 
     from dvs.types.document import Document
     from dvs.types.fact import Fact
@@ -18,19 +23,24 @@ async def get_facts(
     documents: typing.List["Document"],
     *,
     aps_agent: typing.Optional["APSAgent"] = None,
-    model: (
-        agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel | None
-    ) = None,
+    model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
     max_concurrency: int = 1,
+    cache: cachetic.Cachetic["APSResult"] | None = None,
     verbose: bool = False,
 ) -> typing.List["Fact"]:
     """Extract facts from documents using APS agent."""
-    from aps_agent import APSAgent
+    from aps_agent import APSAgent, APSResult
 
     from dvs.types.fact import Fact
     from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
 
     aps_agent = aps_agent or APSAgent()
+    if cache is None:
+        cache = cachetic.Cachetic(
+            object_type=pydantic.TypeAdapter(APSResult),
+            cache_url=pathlib.Path(".cache/aps.cache"),
+        )
+
     all_facts: typing.List[Fact] = []
 
     async def run_aps_agent(doc: "Document"):
@@ -38,9 +48,20 @@ async def get_facts(
         _input_text = doc.content
         logger.info(f"Running APS on {pretty_repr(doc.name, max_string=32)}...")
 
-        facts_result = await aps_agent.run(_input_text, model=model, verbose=verbose)
+        cache_key = (
+            "aps:"
+            + f"{model.model}:"
+            + hashlib.sha256(_input_text.encode()).hexdigest()
+        )
+        might_result = await asyncio.to_thread(cache.get, cache_key)
+        if might_result:
+            result = might_result
+        else:
+            result = await aps_agent.run(_input_text, model=model, verbose=verbose)
+            await asyncio.to_thread(cache.set, cache_key, result)
+
         facts: list[Fact] = []
-        for fact in facts_result.facts:
+        for fact in result.facts:
             facts.append(Fact(fact=fact.fact, document_id=doc.document_id))
         return facts
 

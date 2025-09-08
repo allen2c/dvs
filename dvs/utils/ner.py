@@ -1,11 +1,15 @@
 import asyncio
+import hashlib
 import logging
+import pathlib
 import typing
 
 import agents
+import cachetic
+import pydantic
 
 if typing.TYPE_CHECKING:
-    from ner_agent import NerAgent
+    from ner_agent import NerAgent, NerResult, RelationExtractionResult
 
     from dvs.types.entity import Entity
     from dvs.types.fact import Fact
@@ -19,17 +23,23 @@ async def extract_relations(
     facts: typing.List["Fact"],
     *,
     ner_agent: typing.Optional["NerAgent"] = None,
-    model: (
-        agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel | None
-    ) = None,
+    model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
     max_concurrency: int = 1,
+    cache: cachetic.Cachetic["RelationExtractionResult"] | None = None,
     verbose: bool = False,
 ) -> list["Triplet"]:
+
+    from ner_agent import RelationExtractionResult
 
     from dvs.types.triplet import Triplet
     from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
 
     ner_agent = ner_agent or NerAgent()
+    if cache is None:
+        cache = cachetic.Cachetic(
+            object_type=pydantic.TypeAdapter(RelationExtractionResult),
+            cache_url=pathlib.Path(".cache/relation_extraction.cache"),
+        )
 
     total_count = len(facts)
     complete_count = 0
@@ -41,9 +51,21 @@ async def extract_relations(
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
         logger.debug(f"Extracting relations for fact {current_idx}/{total_count}")
-        result = await ner_agent.extract_relations(
-            fact.fact, model=model, verbose=verbose
+
+        cache_key = (
+            "extract_relations:"
+            + f"{model.model}:"
+            + hashlib.sha256(fact.fact.encode()).hexdigest()
         )
+        might_result = await asyncio.to_thread(cache.get, cache_key)
+        if might_result:
+            result = might_result
+        else:
+            result = await ner_agent.extract_relations(
+                fact.fact, model=model, verbose=verbose
+            )
+            await asyncio.to_thread(cache.set, cache_key, result)
+
         return [
             Triplet(
                 subject=triplet.subject,
@@ -76,16 +98,22 @@ async def extract_entities(
     facts: typing.List["Fact"],
     *,
     ner_agent: typing.Optional["NerAgent"] = None,
-    model: (
-        agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel | None
-    ) = None,
+    model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
     max_concurrency: int = 1,
+    cache: cachetic.Cachetic["NerResult"] | None = None,
     verbose: bool = False,
 ) -> list["Entity"]:
+    from ner_agent import NerResult
+
     from dvs.types.entity import Entity
     from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
 
     ner_agent = ner_agent or NerAgent()
+    if cache is None:
+        cache = cachetic.Cachetic(
+            object_type=pydantic.TypeAdapter(NerResult),
+            cache_url=pathlib.Path(".cache/ner.cache"),
+        )
 
     total_count = len(facts)
     complete_count = 0
@@ -96,7 +124,19 @@ async def extract_entities(
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
         logger.debug(f"Extracting entities for fact {current_idx}/{total_count}")
-        result = await ner_agent.run(fact.fact, model=model, verbose=verbose)
+
+        cache_key = (
+            "extract_entities:"
+            + f"{model.model}:"
+            + hashlib.sha256(fact.fact.encode()).hexdigest()
+        )
+        might_result = await asyncio.to_thread(cache.get, cache_key)
+        if might_result:
+            result = might_result
+        else:
+            result = await ner_agent.run(fact.fact, model=model, verbose=verbose)
+            await asyncio.to_thread(cache.set, cache_key, result)
+
         return [
             Entity(
                 name=entity.name,
