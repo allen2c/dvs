@@ -852,6 +852,7 @@ class DVS(DVSMixin):
         Returns:
             List of GraphRAGResult items without point payload.
         """  # noqa: E501
+        from dvs.types.edge import RelationIsFrom, RelationRelatedTo
 
         if query_expander is None:
             raise ValueError("query_expander must be provided for LLM-based expansion.")
@@ -922,12 +923,105 @@ class DVS(DVSMixin):
                 model_settings=self.model_settings,
             )
 
-            # 3) Combine vectors (simple average)
-            combined_vector: list[float] = [
-                (current_vector[i] + sum(v[i] for v in expanded_vectors))
-                / (1.0 + float(len(expanded_vectors)))
-                for i in range(len(current_vector))
+            # 2b) Graph-guided expansion (is_from 1-hop) to boost recall
+            seed_doc_ids: list[str] = [doc.document_id for _, doc, _ in best_results]
+            entity_ids: set[str] = set()
+            for doc_id in seed_doc_ids:
+                try:
+                    doc_node = self.db.graph.nodes.retrieve_by_label(
+                        doc_id, verbose=False
+                    )
+                    # Preferred direction: entity -> document (to_node == doc)
+                    neighbors = self.db.graph.get_neighbors(
+                        to_node_id_or_label=doc_node.node_id,
+                        relation=RelationIsFrom,
+                        limit=300,
+                        verbose=False,
+                    )
+                    for from_node, _edge, to_node in neighbors:
+                        # Accept whichever side is the entity
+                        if from_node.kind == "entity":
+                            entity_ids.add(from_node.node_id)
+                        if to_node.kind == "entity":
+                            entity_ids.add(to_node.node_id)
+                except Exception:
+                    continue
+
+            # Suppress hubs using PageRank threshold
+            pr = self.db.graph.pagerank(
+                relation=RelationRelatedTo, limit=5000, verbose=False
+            )
+            pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
+            # Keep entities without PR score to avoid over-filtering in sparse graphs
+            filtered_entity_ids: list[str] = [
+                eid for eid in entity_ids if pr_map.get(eid, 1.0) >= 0.15
             ]
+
+            # Expand to new documents (caps: 8 per entity, 150 total)
+            graph_doc_ids: set[str] = set()
+            for eid in filtered_entity_ids:
+                if len(graph_doc_ids) >= 150:
+                    break
+                try:
+                    doc_neighbors = self.db.graph.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationIsFrom,
+                        limit=8,
+                        verbose=False,
+                    )
+                    for from_node, _edge, to_node in doc_neighbors:
+                        # Accept either side that is document
+                        if to_node.kind == "document":
+                            graph_doc_ids.add(to_node.label)
+                        if from_node.kind == "document":
+                            graph_doc_ids.add(from_node.label)
+                        if len(graph_doc_ids) >= 150:
+                            break
+                except Exception:
+                    continue
+
+            new_graph_docs = graph_doc_ids.difference(set(seed_doc_ids))
+            if len(new_graph_docs) == 0:
+                logger.info(
+                    "[gRAG_Iter] No new documents from graph expansion; stopping."
+                )
+                break
+
+            # Build centroid from candidate document points
+            graph_vectors: list[list[float]] = []
+            for gdoc in list(new_graph_docs)[:150]:
+                try:
+                    pts = self.db.points.gen(
+                        document_id=gdoc,
+                        limit=3,
+                        with_embedding=True,
+                        verbose=False,
+                    )
+                    for pt in pts:
+                        if pt.embedding:
+                            graph_vectors.append(pt.to_python())
+                except Exception:
+                    continue
+
+            # 3) Combine vectors (weighted average: base, LLM, graph)
+            has_llm = len(expanded_vectors) > 0
+            has_graph = len(graph_vectors) > 0
+            llm_w: float = 0.6 if has_llm else 0.0
+            graph_w: float = 0.4 if has_graph else 0.0
+            base_w: float = 1.0
+
+            def mean_at(i: int, vecs: list[list[float]]) -> float:
+                return sum(v[i] for v in vecs) / float(len(vecs)) if vecs else 0.0
+
+            denom: float = base_w + llm_w + graph_w
+            combined_vector: list[float] = []
+            for i in range(len(current_vector)):
+                val = (
+                    base_w * current_vector[i]
+                    + llm_w * mean_at(i, expanded_vectors)
+                    + graph_w * mean_at(i, graph_vectors)
+                ) / (denom if denom > 0 else 1.0)
+                combined_vector.append(val)
 
             # 4) Re-search with refined vector
             refined_results = await VSS.vector_search(

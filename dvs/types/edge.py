@@ -1,3 +1,14 @@
+"""
+# (Node)-[RelationIsFrom]->(DocumentNode)
+#   Example: ('sushi', 'is_from', 'doc-456')  # "sushi" concept is mentioned in document "doc-456"
+# (Node)-[RelationIsA]->(Node)
+#   Example: ('Tesla Model S', 'is_a', 'electric car')  # "Tesla Model S" is a type of "electric car"
+# (Node)-[RelationHasA]->(Node)
+#   Example: ('Grand Library', 'has_a', 'reading room')  # "Grand Library" has a "reading room"
+# (Node)-[RelationRelatedTo]->(Node)
+#   Example: ('machine learning', 'related_to', 'artificial intelligence')  # "machine learning" is related to "artificial intelligence"
+"""  # noqa: E501
+
 import typing
 
 import pydantic
