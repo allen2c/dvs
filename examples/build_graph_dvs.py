@@ -368,6 +368,35 @@ async def main():
     except Exception as e:
         print(f"⚠️ Error running Strategy 4: {e}")
 
+    # --- Step 13: Strategy 5 Demo (Context-Aware Expansion) ---
+    console.rule("[bold magenta]Step 13: Graph-RAG Strategy 5 Demo[/bold magenta]")
+    console.rule("[bold yellow]Strategy 5: Context-Aware Expansion")
+
+    print("🎯 Strategy 5 uses: baseline seeds → is_from expand → context centroid")
+    ctx_threshold: float = 0.0
+
+    try:
+        ctx_results: list[GraphRAGResult] = (
+            await dvs_client.graph_rag_search_context_aware(
+                query=query,
+                top_k=3,
+                context_similarity_threshold=ctx_threshold,
+                max_expansion_steps=1,
+                verbose=True,
+            )
+        )
+
+        print("\n📊 Results for Strategy 5 (Context-Aware):")
+        for i, item in enumerate(ctx_results, 1):
+            name = item.document.name
+            score_str = f"{item.score:.3f}"
+            v_str = f"{(item.vector_score or 0.0):.3f}"
+            g_str = f"{(item.graph_score or 0.0):.3f}"
+            print(f"   {i}. {name}: {score_str} (vector={v_str}, context={g_str})")
+            print(f"      Content: {item.document.content[:100]}...")
+    except Exception as e:
+        print(f"⚠️ Error running Strategy 5: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
