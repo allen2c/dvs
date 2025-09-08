@@ -46,9 +46,10 @@ async def get_valid_canonical_map(
 
     clusters: typing.Dict[int, list[str]] = {}
     for i, label in enumerate(clusters_labels):
-        if label not in clusters:
-            clusters[label] = []
-        clusters[label].append(labels[i])
+        label_int = int(label)  # Convert numpy int to Python int
+        if label_int not in clusters:
+            clusters[label_int] = []
+        clusters[label_int].append(labels[i])
     logger.info(f"✅ Clustered entities into {len(set(clusters_labels)) - 1} groups.")
 
     # 3. LLM Validation and Canonical Map Generation
