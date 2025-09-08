@@ -50,7 +50,10 @@ async def extract_relations(
         nonlocal complete_count
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
-        logger.debug(f"Extracting relations for fact {current_idx}/{total_count}")
+
+        percent_step: int = max(1, total_count // 10)
+        if (current_idx % percent_step == 0) or (current_idx == total_count):
+            logger.debug(f"Extracting relations for fact {current_idx}/{total_count}")
 
         cache_key = (
             "extract_relations:"
@@ -123,7 +126,10 @@ async def extract_entities(
         nonlocal complete_count
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
-        logger.debug(f"Extracting entities for fact {current_idx}/{total_count}")
+
+        percent_step: int = max(1, total_count // 10)
+        if (current_idx % percent_step == 0) or (current_idx == total_count):
+            logger.debug(f"Extracting entities for fact {current_idx}/{total_count}")
 
         cache_key = (
             "extract_entities:"
