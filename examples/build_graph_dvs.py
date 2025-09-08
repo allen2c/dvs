@@ -19,11 +19,13 @@ from rich.console import Console
 import dvs
 from dvs.types.document import Document
 from dvs.types.edge import Edge
+from dvs.types.graphrag_result import GraphRAGResult
 from dvs.types.node import Node
 from dvs.utils.build_graph_from_documents import build_graph_from_documents
 from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
 from dvs.utils.loads_graph import load_graph
+from dvs.utils.query_expander import build_llm_query_expander
 
 VERBOSE = False
 MAX_CONCURRENCY = 4
@@ -332,6 +334,39 @@ async def main():
             print(f"      Content: {doc.content[:100]}...")
     except Exception as e:
         print(f"⚠️ Error running Strategy 3: {e}")
+
+    # --- Step 12: Strategy 4 Demo (Iterative Refinement with LLM Expander) ---
+    console.rule("[bold magenta]Step 12: Strategy 4 Demo[/bold magenta]")
+    console.rule("[bold yellow]Strategy 4: Iterative Refinement (LLM expansion)")
+
+    try:
+        expander = build_llm_query_expander(
+            chat_model,
+            max_suggestions=3,
+            system_prompt=None,
+            verbose=VERBOSE,
+        )
+        iter4_results: list[GraphRAGResult] = (
+            await dvs_client.graph_rag_search_iterative_refinement(
+                query=query,
+                top_k=3,
+                max_iterations=3,
+                refinement_threshold=0.05,
+                expansions_per_iter=3,
+                query_expander=expander,
+                verbose=VERBOSE,
+            )
+        )
+
+        print("\n📊 Results for Strategy 4 (Iterative Refinement):")
+        for i, item in enumerate(iter4_results, 1):
+            name = item.document.name
+            score_str = f"{item.score:.3f}"
+            iters_str = str(item.iterations)
+            print(f"   {i}. {name}: {score_str} (iters={iters_str})")
+            print(f"      Content: {item.document.content[:100]}...")
+    except Exception as e:
+        print(f"⚠️ Error running Strategy 4: {e}")
 
 
 if __name__ == "__main__":

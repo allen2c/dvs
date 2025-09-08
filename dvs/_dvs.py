@@ -14,6 +14,8 @@ import dvs
 import dvs.utils.vss as VSS
 from dvs.config import Settings
 from dvs.types.document import Document
+from dvs.types.encoding_type import EncodingType
+from dvs.types.graphrag_result import GraphRAGResult
 from dvs.types.point import Point
 from dvs.types.search_request import SearchRequest
 from dvs.utils.chunk import chunks
@@ -827,10 +829,13 @@ class DVS(DVSMixin):
         top_k: int = 3,
         *,
         max_iterations: int = 3,
-        refinement_threshold: float = 0.1,
-        with_embedding: bool = False,
+        refinement_threshold: float = 0.05,
+        expansions_per_iter: int = 3,
+        query_expander: (
+            typing.Callable[[str], "typing.Awaitable[list[str]]"] | None
+        ) = None,
         verbose: bool | None = None,
-    ) -> list[tuple["Point", "Document", float]]:
+    ) -> list[GraphRAGResult]:
         """
         Graph-RAG Strategy 4: Iterative Refinement
 
@@ -845,10 +850,151 @@ class DVS(DVSMixin):
             verbose: Whether to show detailed information
 
         Returns:
-            Search results list [(Point, Document, relevance_score), ...]
+            List of GraphRAGResult items without point payload.
         """  # noqa: E501
-        # TODO: Implement Strategy 4 - Iterative Refinement
-        raise NotImplementedError("Strategy 4 not yet implemented")
+
+        if query_expander is None:
+            raise ValueError("query_expander must be provided for LLM-based expansion.")
+
+        # Step 0: Prepare baseline using original query
+        base_vector: list[float] = (
+            await SearchRequest.to_vectors(
+                [SearchRequest(query=query, top_k=1, encoding=EncodingType.PLAINTEXT)],
+                model=self.model,
+                model_settings=self.model_settings,
+            )
+        )[0]
+
+        baseline_results = await VSS.vector_search(
+            vector=base_vector,
+            top_k=max(1, top_k),
+            embedding_dimensions=self.db_manifest.embedding_dimensions,
+            documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
+            points_table_name=dvs.DVS_POINTS_TABLE_NAME,
+            conn=self.new_connection(read_only=True),
+            with_embedding=False,
+            debug=self.v(verbose),
+            console=self.settings.console,
+        )
+
+        if not baseline_results:
+            return []
+
+        best_results: list[tuple[Point, Document, float]] = baseline_results
+        best_top1: float = float(baseline_results[0][2])
+        current_vector: list[float] = list(base_vector)
+        iterations: int = 0
+
+        if self.v(verbose):
+            top_docs = ", ".join(
+                [
+                    doc.name
+                    for _, doc, _ in baseline_results[: min(3, len(baseline_results))]
+                ]
+            )
+            logger.info(
+                f"[gRAG_Iter] Baseline top1={best_top1:.3f}; top docs: {top_docs}"
+            )
+
+        # Iterative loop
+        while iterations < max_iterations:
+            # 1) Expand query terms with LLM agent
+            expanded_queries: list[str] = [
+                q
+                for q in (await query_expander(query))[:expansions_per_iter]
+                if isinstance(q, str) and q.strip()
+            ]
+            if not expanded_queries:
+                logger.info("[gRAG_Iter] No expanded queries returned; stopping.")
+                break
+
+            logger.debug(
+                f"[gRAG_Iter] Iter {iterations + 1} expansions: {expanded_queries}"
+            )
+
+            # 2) Embed expansions
+            expanded_vectors: list[list[float]] = await SearchRequest.to_vectors(
+                [
+                    SearchRequest(query=eq, top_k=1, encoding=EncodingType.PLAINTEXT)
+                    for eq in expanded_queries
+                ],
+                model=self.model,
+                model_settings=self.model_settings,
+            )
+
+            # 3) Combine vectors (simple average)
+            combined_vector: list[float] = [
+                (current_vector[i] + sum(v[i] for v in expanded_vectors))
+                / (1.0 + float(len(expanded_vectors)))
+                for i in range(len(current_vector))
+            ]
+
+            # 4) Re-search with refined vector
+            refined_results = await VSS.vector_search(
+                vector=combined_vector,
+                top_k=max(1, top_k),
+                embedding_dimensions=self.db_manifest.embedding_dimensions,
+                documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
+                points_table_name=dvs.DVS_POINTS_TABLE_NAME,
+                conn=self.new_connection(read_only=True),
+                with_embedding=False,
+                debug=self.v(verbose),
+                console=self.settings.console,
+            )
+
+            if not refined_results:
+                logger.info("[gRAG_Iter] Refined search returned no results; stopping.")
+                break
+
+            refined_top1: float = float(refined_results[0][2])
+            improvement: float = refined_top1 - best_top1
+
+            top_docs_refined = ", ".join(
+                [
+                    doc.name
+                    for _, doc, _ in refined_results[: min(3, len(refined_results))]
+                ]
+            )
+            logger.debug(
+                (
+                    f"[gRAG_Iter] Iter {iterations + 1} top1={refined_top1:.3f} "
+                    + f"improve={improvement:.3f}; top docs: {top_docs_refined}"
+                )
+            )
+
+            # 5) Check convergence using top-1 score improvement
+            if improvement <= refinement_threshold:
+                logger.info(
+                    (
+                        f"[gRAG_Iter] Stop: improvement {improvement:.3f} "
+                        + f"<= threshold {refinement_threshold:.3f}."
+                    )
+                )
+                break
+
+            # 6) Accept refinement and continue
+            best_results = refined_results
+            best_top1 = refined_top1
+            current_vector = combined_vector
+            iterations += 1
+
+            logger.info(
+                f"[gRAG_Iter] Accept iter {iterations}; new best_top1={best_top1:.3f}"
+            )
+
+        # Build GraphRAGResult output
+        output: list[GraphRAGResult] = [
+            GraphRAGResult(
+                document=doc,
+                score=float(score),
+                vector_score=float(score),
+                graph_score=None,
+                iterations=iterations,
+            )
+            for (_point, doc, score) in best_results[:top_k]
+        ]
+
+        return output
 
     async def graph_rag_search_context_aware(
         self,
