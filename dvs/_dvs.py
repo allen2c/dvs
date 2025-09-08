@@ -319,7 +319,7 @@ class DVS(DVSMixin):
         graph_weight: float = 0.3,
         with_embedding: bool = False,
         verbose: bool | None = None,
-    ) -> list[tuple["Point", "Document", float]]:
+    ) -> list[GraphRAGResult]:
         """
         Graph-RAG Strategy 1: Vector + Graph Expansion
 
@@ -335,7 +335,7 @@ class DVS(DVSMixin):
             verbose: Whether to show detailed information
 
         Returns:
-            Search results list [(Point, Document, relevance_score), ...]
+            List of GraphRAGResult items with vector and graph scores.
         """  # noqa: E501
 
         # Step 1: Vector search - Find most relevant documents
@@ -425,7 +425,26 @@ class DVS(DVSMixin):
 
         # Fall back to original results if no candidates found
         if not expanded_candidates:
-            return initial_results[:top_k]
+            # Fallback: wrap initial results into GraphRAGResult
+            wrapped: list[GraphRAGResult] = []
+            # Normalize by top score if possible
+            max_score: float = float(initial_results[0][2]) if initial_results else 1.0
+            for idx, (_pt, doc, sc) in enumerate(initial_results[:top_k], start=1):
+                val: float = float(sc)
+                norm: float = (val / max_score) if max_score > 0 else 0.0
+                wrapped.append(
+                    GraphRAGResult(
+                        document=doc,
+                        score=val,
+                        vector_score=val,
+                        graph_score=0.0,
+                        iterations=None,
+                        rank=idx,
+                        normalized_score=norm,
+                        strategy="vector_expansion",
+                    )
+                )
+            return wrapped
 
         # Step 6: Calculate vector similarity for candidate points
         query_vector = (
@@ -447,7 +466,7 @@ class DVS(DVSMixin):
                 continue
 
         # Step 7: Calculate combined score (vector similarity + graph relevance)
-        final_results = []
+        final_results: list[tuple[Point, Document, float, float, float]] = []
         for point, vector_score in scored_candidates:
             try:
                 doc = self.db.documents.retrieve(
@@ -464,18 +483,44 @@ class DVS(DVSMixin):
                 )
 
                 # Combined scoring
-                combined_score = (
-                    vector_weight * vector_score + graph_weight * graph_score
-                )
+                combined_score: float = vector_weight * float(
+                    vector_score
+                ) + graph_weight * float(graph_score)
 
-                final_results.append((point, doc, combined_score))
+                final_results.append(
+                    (
+                        point,
+                        doc,
+                        combined_score,
+                        float(vector_score),
+                        float(graph_score),
+                    )
+                )
 
             except Exception:
                 continue
 
         # Step 8: Sort by combined score and return top-k
         final_results.sort(key=lambda x: x[2], reverse=True)
-        return final_results[:top_k]
+        top = final_results[:top_k]
+        # Normalize scores by top score
+        max_score: float = float(top[0][2]) if top else 1.0
+        out: list[GraphRAGResult] = []
+        for idx, (_p, doc, combined, vsc, gsc) in enumerate(top, start=1):
+            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
+            out.append(
+                GraphRAGResult(
+                    document=doc,
+                    score=float(combined),
+                    vector_score=float(vsc),
+                    graph_score=float(gsc),
+                    iterations=None,
+                    rank=idx,
+                    normalized_score=norm,
+                    strategy="vector_expansion",
+                )
+            )
+        return out
 
     async def graph_rag_search_graph_guided(
         self,
@@ -488,7 +533,7 @@ class DVS(DVSMixin):
         graph_weight: float = 0.4,
         with_embedding: bool = False,
         verbose: bool | None = None,
-    ) -> list[tuple["Point", "Document", float]]:
+    ) -> list[GraphRAGResult]:
         """
         Graph-RAG Strategy 2: Graph-Guided Vector Search
 
@@ -512,7 +557,7 @@ class DVS(DVSMixin):
             verbose: Whether to show detailed information
 
         Returns:
-            Search results list [(Point, Document, relevance_score), ...]
+            List of GraphRAGResult items with vector and graph scores.
         """  # noqa: E501
         from dvs.types.edge import RelationIsFrom, RelationRelatedTo
 
@@ -542,12 +587,26 @@ class DVS(DVSMixin):
             logger.warning(
                 "⚠️ No PageRank results found, falling back to regular search"
             )
-            return await self.search(
+            base = await self.search(
                 query,
                 top_k=top_k,
                 with_embedding=with_embedding,
                 verbose=self.v(verbose),
             )
+            max_score: float = float(base[0][2]) if base else 1.0
+            return [
+                GraphRAGResult(
+                    document=doc,
+                    score=float(sc),
+                    vector_score=float(sc),
+                    graph_score=0.0,
+                    iterations=None,
+                    rank=i + 1,
+                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                    strategy="graph_guided",
+                )
+                for i, (_p, doc, sc) in enumerate(base)
+            ]
 
         # Filter to get high-centrality nodes above threshold
         important_nodes = []
@@ -603,12 +662,26 @@ class DVS(DVSMixin):
             logger.warning(
                 "⚠️ No related documents found, falling back to regular search"
             )
-            return await self.search(
+            base = await self.search(
                 query,
                 top_k=top_k,
                 with_embedding=with_embedding,
                 verbose=self.v(verbose),
             )
+            max_score: float = float(base[0][2]) if base else 1.0
+            return [
+                GraphRAGResult(
+                    document=doc,
+                    score=float(sc),
+                    vector_score=float(sc),
+                    graph_score=0.0,
+                    iterations=None,
+                    rank=i + 1,
+                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                    strategy="graph_guided",
+                )
+                for i, (_p, doc, sc) in enumerate(base)
+            ]
 
         # Step 3: Vector search on the collected documents
         logger.debug(
@@ -635,12 +708,26 @@ class DVS(DVSMixin):
             logger.warning(
                 "⚠️ No candidate points found, falling back to regular search"
             )
-            return await self.search(
+            base = await self.search(
                 query,
                 top_k=top_k,
                 with_embedding=with_embedding,
                 verbose=self.v(verbose),
             )
+            max_score: float = float(base[0][2]) if base else 1.0
+            return [
+                GraphRAGResult(
+                    document=doc,
+                    score=float(sc),
+                    vector_score=float(sc),
+                    graph_score=0.0,
+                    iterations=None,
+                    rank=i + 1,
+                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                    strategy="graph_guided",
+                )
+                for i, (_p, doc, sc) in enumerate(base)
+            ]
 
         # Step 4: Calculate vector similarities and combine with graph scores
         logger.debug("⚖️ Step 4: Calculating combined scores...")
@@ -654,7 +741,7 @@ class DVS(DVSMixin):
             )
         )[0]
 
-        scored_candidates = []
+        scored_candidates: list[tuple[Point, Document, float, float]] = []
         for point in candidate_points:
             try:
                 if not point.embedding:
@@ -694,7 +781,9 @@ class DVS(DVSMixin):
                     vector_weight * vector_similarity + graph_weight * graph_importance
                 )
 
-                scored_candidates.append((point, doc, combined_score))
+                scored_candidates.append(
+                    (point, doc, combined_score, vector_similarity)
+                )
 
             except Exception as e:
                 logger.error(f"⚠️ Error processing point {point.point_id}: {e}")
@@ -708,7 +797,24 @@ class DVS(DVSMixin):
             f"Found {len(scored_candidates)} candidates."
         )
 
-        return scored_candidates[:top_k]
+        top = scored_candidates[:top_k]
+        max_score: float = float(top[0][2]) if top else 1.0
+        out: list[GraphRAGResult] = []
+        for idx, (_p, doc, combined, vsc) in enumerate(top, start=1):
+            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
+            out.append(
+                GraphRAGResult(
+                    document=doc,
+                    score=float(combined),
+                    vector_score=float(vsc),
+                    graph_score=None,
+                    iterations=None,
+                    rank=idx,
+                    normalized_score=norm,
+                    strategy="graph_guided",
+                )
+            )
+        return out
 
     async def graph_rag_search_hybrid_scoring(
         self,
@@ -720,7 +826,7 @@ class DVS(DVSMixin):
         graph_distance_weight: float = 0.2,
         with_embedding: bool = False,
         verbose: bool | None = None,
-    ) -> list[tuple["Point", "Document", float]]:
+    ) -> list[GraphRAGResult]:
         """
         Graph-RAG Strategy 3: Hybrid Scoring
 
@@ -736,7 +842,7 @@ class DVS(DVSMixin):
             verbose: Whether to show detailed information
 
         Returns:
-            Search results list [(Point, Document, relevance_score), ...]
+            List of GraphRAGResult items with vector, importance and distance scores.
         """
         from dvs.types.edge import RelationIsFrom, RelationRelatedTo
 
@@ -800,7 +906,7 @@ class DVS(DVSMixin):
             )
 
         # Step 4: Combine scores
-        combined_results: list[tuple["Point", "Document", float]] = []
+        combined_results: list[tuple[Point, Document, float, float, float]] = []
 
         for point, doc, vector_score in initial_results:
             try:
@@ -815,13 +921,38 @@ class DVS(DVSMixin):
                     + graph_distance_weight * graph_distance_score
                 )
 
-                combined_results.append((point, doc, combined_score))
+                combined_results.append(
+                    (
+                        point,
+                        doc,
+                        combined_score,
+                        float(graph_importance),
+                        float(graph_distance_score),
+                    )
+                )
             except Exception:
                 continue
 
         # Step 5: Sort and return top-k
         combined_results.sort(key=lambda x: x[2], reverse=True)
-        return combined_results[:top_k]
+        top = combined_results[:top_k]
+        max_score: float = float(top[0][2]) if top else 1.0
+        out: list[GraphRAGResult] = []
+        for idx, (_p, doc, combined, gimp, gdist) in enumerate(top, start=1):
+            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
+            out.append(
+                GraphRAGResult(
+                    document=doc,
+                    score=float(combined),
+                    vector_score=None,
+                    graph_score=float(0.5 * (gimp + gdist)),
+                    iterations=None,
+                    rank=idx,
+                    normalized_score=norm,
+                    strategy="hybrid_scoring",
+                )
+            )
+        return out
 
     async def graph_rag_search_iterative_refinement(
         self,
@@ -1099,7 +1230,7 @@ class DVS(DVSMixin):
         max_expansion_steps: int = 2,
         with_embedding: bool = False,
         verbose: bool | None = None,
-    ) -> list[tuple["Point", "Document", float]]:
+    ) -> list[GraphRAGResult]:
         """
         Graph-RAG Strategy 5: Context-Aware Expansion
 

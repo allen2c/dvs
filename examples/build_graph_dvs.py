@@ -198,9 +198,9 @@ async def main():
         verbose=VERBOSE,
     )
 
-    for i, (point, doc, score) in enumerate(graph_rag_results, 1):
-        print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
-        print(f"   Content: {doc.content[:100]}...")
+    for i, item in enumerate(graph_rag_results, 1):
+        print(f"{i}. Score: {item.score:.3f}, Document: {item.document.name}")
+        print(f"   Content: {item.document.content[:100]}...")
 
     console.rule("[bold cyan]Comparison Summary[/bold cyan]")
     print("Graph-RAG can find:")
@@ -233,9 +233,9 @@ async def main():
             strategy2_results[threshold] = results
 
             print(f"\n📊 Results for threshold {threshold}:")
-            for i, (point, doc, score) in enumerate(results, 1):
-                print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
-                print(f"   Content: {doc.content[:100]}...")
+            for i, item in enumerate(results, 1):
+                print(f"{i}. Score: {item.score:.3f}, Document: {item.document.name}")
+                print(f"   Content: {item.document.content[:100]}...")
 
         except Exception as e:
             print(f"⚠️ Error with threshold {threshold}: {e}")
@@ -257,16 +257,16 @@ async def main():
 
     # Strategy 1 results
     print("2️⃣ Graph-RAG Strategy 1 (Vector + Graph Expansion):")
-    for i, (point, doc, score) in enumerate(graph_rag_results, 1):
-        print(f"   {i}. {doc.name}: {score:.3f}")
+    for i, item in enumerate(graph_rag_results, 1):
+        print(f"   {i}. {item.document.name}: {item.score:.3f}")
     print("")
 
     # Strategy 2 results for different thresholds
     for threshold, results in strategy2_results.items():
         if results:
             print(f"3️⃣ Graph-RAG Strategy 2 (Threshold {threshold}):")
-            for i, (point, doc, score) in enumerate(results, 1):
-                print(f"   {i}. {doc.name}: {score:.3f}")
+            for i, item in enumerate(results, 1):
+                print(f"   {i}. {item.document.name}: {item.score:.3f}")
             print("")
 
     # --- Step 9: Strategy 2 Deep Analysis ---
@@ -329,9 +329,9 @@ async def main():
         )
 
         print("\n📊 Results for Strategy 3 (Hybrid Scoring):")
-        for i, (point, doc, score) in enumerate(hybrid_results, 1):
-            print(f"   {i}. {doc.name}: {score:.3f}")
-            print(f"      Content: {doc.content[:100]}...")
+        for i, item in enumerate(hybrid_results, 1):
+            print(f"   {i}. {item.document.name}: {item.score:.3f}")
+            print(f"      Content: {item.document.content[:100]}...")
     except Exception as e:
         print(f"⚠️ Error running Strategy 3: {e}")
 
