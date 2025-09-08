@@ -178,7 +178,7 @@ async def main():
     console.rule("[bold blue]Step 6: Graph-RAG Search Demo[/bold blue]")
 
     # Compare traditional RAG vs Graph-RAG search results
-    query = "artificial intelligence"
+    query: str = "Where are Michelin restaurants?"
 
     console.rule("[bold yellow]Traditional RAG Search[/bold yellow]")
     traditional_results = await dvs_client.search(query, top_k=3, verbose=True)
@@ -195,6 +195,17 @@ async def main():
         graph_weight=0.3,
         verbose=True,
     )
+    print()
+    print()
+    print()
+    print()
+    print()
+    print(graph_rag_results)
+    print()
+    print()
+    print()
+    print()
+    print()
 
     for i, (point, doc, score) in enumerate(graph_rag_results, 1):
         print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
@@ -205,6 +216,109 @@ async def main():
     print("• Documents connected through entity relationships")
     print("• Semantically related content via graph traversal")
     print("• Better context by considering document interconnections")
+
+    # --- Step 7: Graph-RAG Strategy 2 Demo ---
+    console.rule("[bold magenta]Step 7: Graph-RAG Strategy 2 Demo[/bold magenta]")
+    console.rule("[bold yellow]Strategy 2: Graph-Guided Vector Search[/bold yellow]")
+
+    print("🎯 Strategy 2 Flow:")
+    print("   Query → PageRank → Important Nodes → Vector Search → Combined Scoring")
+    print()
+
+    # Test different centrality thresholds
+    thresholds = [0.3, 0.5, 0.7]
+    strategy2_results = {}
+
+    for threshold in thresholds:
+        console.rule(
+            f"[bold blue]Testing Centrality Threshold: {threshold}[/bold blue]"
+        )
+
+        try:
+            results = await dvs_client.graph_rag_search_graph_guided(
+                query=query, top_k=3, centrality_threshold=threshold, verbose=True
+            )
+
+            strategy2_results[threshold] = results
+
+            print(f"\n📊 Results for threshold {threshold}:")
+            for i, (point, doc, score) in enumerate(results, 1):
+                print(f"{i}. Score: {score:.3f}, Document: {doc.name}")
+                print(f"   Content: {doc.content[:100]}...")
+
+        except Exception as e:
+            print(f"⚠️ Error with threshold {threshold}: {e}")
+            strategy2_results[threshold] = []
+
+        print()
+
+    # --- Step 8: Strategy Comparison ---
+    console.rule("[bold green]Step 8: Strategy Comparison[/bold green]")
+
+    print("🔍 Comparison of all strategies:")
+    print()
+
+    # Traditional search results
+    print("1️⃣ Traditional Vector Search:")
+    for i, (point, doc, score) in enumerate(traditional_results, 1):
+        print(f"   {i}. {doc.name}: {score:.3f}")
+    print()
+
+    # Strategy 1 results
+    print("2️⃣ Graph-RAG Strategy 1 (Vector + Graph Expansion):")
+    for i, (point, doc, score) in enumerate(graph_rag_results, 1):
+        print(f"   {i}. {doc.name}: {score:.3f}")
+    print()
+
+    # Strategy 2 results for different thresholds
+    for threshold, results in strategy2_results.items():
+        if results:
+            print(f"3️⃣ Graph-RAG Strategy 2 (Threshold {threshold}):")
+            for i, (point, doc, score) in enumerate(results, 1):
+                print(f"   {i}. {doc.name}: {score:.3f}")
+            print()
+
+    # --- Step 9: Strategy 2 Deep Analysis ---
+    console.rule("[bold purple]Step 9: Strategy 2 Deep Analysis[/bold purple]")
+
+    # Analyze PageRank results
+    try:
+        print("📊 Analyzing PageRank centrality in the graph...")
+        pagerank_results = dvs_client.db.graph.pagerank(
+            relation="related_to", limit=10, verbose=False
+        )
+
+        print("\n🏆 Top 10 Most Important Entities (by PageRank):")
+        for i, (node_id, score) in enumerate(pagerank_results[:10], 1):
+            try:
+                node = dvs_client.db.graph.nodes.retrieve(node_id, verbose=False)
+                print(f"   {i}. {node.label}: {score:.4f}")
+            except Exception:
+                print(f"   {i}. {node_id}: {score:.4f}")
+
+        print(f"\n📈 Total entities analyzed: {len(pagerank_results)}")
+
+    except Exception as e:
+        print(f"⚠️ Error analyzing PageRank: {e}")
+
+    # --- Step 10: Performance Insights ---
+    console.rule("[bold cyan]Step 10: Performance Insights[/bold cyan]")
+
+    insights = [
+        "🎯 Strategy 2 excels at finding authoritative, well-connected content",
+        "📊 PageRank helps discover content through 'important' entities",
+        "🔗 Graph-guided search finds semantically related but not obvious content",
+        "⚖️ Combined scoring balances vector similarity with graph importance",
+        "🎚️ Threshold tuning affects precision vs. recall trade-off",
+        "🚀 Strategy 2 is great for expert-level or authoritative content discovery",
+    ]
+
+    for insight in insights:
+        print(f"💡 {insight}")
+
+    print()
+    print("✨ Demo completed! Strategy 2 showcases how graphs can intelligently")
+    print("   guide vector search to find more relevant and authoritative content.")
 
 
 if __name__ == "__main__":

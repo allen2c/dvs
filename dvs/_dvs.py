@@ -172,8 +172,6 @@ class DVS(DVSMixin):
         Returns dict with creation stats and ignores duplicates if ignore_same_content=True.
         """  # noqa: E501
 
-        verbose = self.verbose if verbose is None else verbose
-
         # Validate documents
         docs: list["Document"] = Document.from_contents(documents)
         ignored_docs_indexes: list[int] = []
@@ -183,7 +181,10 @@ class DVS(DVSMixin):
         chunked_docs = [
             chunked_doc
             for doc in tqdm(
-                docs, total=len(docs), disable=not verbose, desc="Chunking documents"
+                docs,
+                total=len(docs),
+                disable=not self.v(verbose),
+                desc="Chunking documents",
             )
             for chunked_doc in doc.to_chunked_documents(
                 lines_per_chunk=lines_per_chunk,
@@ -254,12 +255,11 @@ class DVS(DVSMixin):
         Accepts single document ID or iterable of IDs and deletes both documents and points.
         Operation is irreversible and raises NotFoundError if document ID doesn't exist.
         """  # noqa: E501
-        verbose = self.verbose if verbose is None else verbose
         doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
 
-        self.db.points.remove_many(document_ids=doc_ids, verbose=verbose)
+        self.db.points.remove_many(document_ids=doc_ids, verbose=self.v(verbose))
         for doc_id in doc_ids:
-            self.db.documents.remove(doc_id, verbose=verbose)
+            self.db.documents.remove(doc_id, verbose=self.v(verbose))
 
         return None
 
@@ -276,8 +276,6 @@ class DVS(DVSMixin):
         Converts query to embedding via OpenAI API and searches DuckDB using cosine similarity.
         Returns list of tuples containing matched point, document, and relevance score.
         """  # noqa: E501
-
-        verbose = self.verbose if verbose is None else verbose
 
         sanitized_query = str_or_none(query)
         if sanitized_query is None:
@@ -303,6 +301,7 @@ class DVS(DVSMixin):
             points_table_name=dvs.DVS_POINTS_TABLE_NAME,
             conn=self.new_connection(read_only=True),
             with_embedding=search_req.with_embedding,
+            debug=self.v(verbose),
             console=self.settings.console,
         )
 
@@ -336,14 +335,13 @@ class DVS(DVSMixin):
         Returns:
             Search results list [(Point, Document, relevance_score), ...]
         """  # noqa: E501
-        verbose = self.verbose if verbose is None else verbose
 
         # Step 1: Vector search - Find most relevant documents
         initial_results = await self.search(
             query=query,
             top_k=top_k * 2,  # Expand candidate set
             with_embedding=with_embedding,
-            verbose=verbose,
+            verbose=self.v(verbose),
         )
 
         if not initial_results:
@@ -356,7 +354,7 @@ class DVS(DVSMixin):
         for doc_id in document_ids:
             try:
                 # Try to find corresponding document node (label = document_id)
-                doc_node = self.db.graph.nodes.retrieve(doc_id, verbose=False)
+                doc_node = self.db.graph.nodes.retrieve(doc_id, verbose=self.v(verbose))
                 document_nodes.append(doc_node)
             except Exception:
                 # Skip if corresponding node not found
@@ -371,7 +369,7 @@ class DVS(DVSMixin):
                     from_node_id_or_label=doc_node.node_id,
                     relation="is_from",
                     limit=10,
-                    verbose=False,
+                    verbose=self.v(verbose),
                 )
 
                 # Collect entity node IDs
@@ -392,7 +390,7 @@ class DVS(DVSMixin):
                         to_node_id_or_label=entity_id,
                         relation="is_from",
                         limit=5,
-                        verbose=False,
+                        verbose=self.v(verbose),
                     )
 
                     # Collect new document IDs
@@ -407,7 +405,9 @@ class DVS(DVSMixin):
         for doc_id in expanded_document_ids:
             try:
                 # Get all points for the document
-                points = self.db.points.gen(document_id=doc_id, limit=10)
+                points = self.db.points.gen(
+                    document_id=doc_id, limit=10, verbose=self.v(verbose)
+                )
                 for point in points:
                     if point.embedding:
                         expanded_candidates.append(point)
@@ -441,12 +441,17 @@ class DVS(DVSMixin):
         final_results = []
         for point, vector_score in scored_candidates:
             try:
-                doc = self.db.documents.retrieve(point.document_id, verbose=False)
+                doc = self.db.documents.retrieve(
+                    point.document_id, verbose=self.v(verbose)
+                )
 
                 # Calculate graph relevance: based on distance to original
                 # query-related documents
                 graph_score = self._calculate_graph_relevance(
-                    point.document_id, document_ids, related_entities
+                    point.document_id,
+                    document_ids,
+                    related_entities,
+                    verbose=self.v(verbose),
                 )
 
                 # Combined scoring
@@ -470,27 +475,222 @@ class DVS(DVSMixin):
         *,
         relation_types: list[str] | None = None,
         centrality_threshold: float = 0.5,
+        vector_weight: float = 0.6,
+        graph_weight: float = 0.4,
         with_embedding: bool = False,
         verbose: bool | None = None,
     ) -> list[tuple["Point", "Document", float]]:
         """
         Graph-RAG Strategy 2: Graph-Guided Vector Search
 
-        Query → Graph search popular nodes → Vector search on these nodes → Combined scoring  # noqa
+        Query → Graph search popular nodes → Vector search on these nodes → Combined scoring
+
+        This strategy leverages graph centrality to guide vector search, finding
+        semantically relevant content through graph structure analysis.
+
+        Step 1: Use graph algorithms to find important nodes in the knowledge graph
+        Step 2: Perform vector search on these important nodes
+        Step 3: Combine graph importance scores with vector similarity scores
 
         Args:
             query: Search query
             top_k: Number of results to return
             relation_types: Graph relation type filters
             centrality_threshold: Centrality threshold
+            vector_weight: Vector similarity weight
+            graph_weight: Graph importance weight
             with_embedding: Whether to include embedding
             verbose: Whether to show detailed information
 
         Returns:
             Search results list [(Point, Document, relevance_score), ...]
-        """
-        # TODO: Implement Strategy 2 - Graph-Guided Vector Search
-        raise NotImplementedError("Strategy 2 not yet implemented")
+        """  # noqa: E501
+        from dvs.types.edge import RelationIsFrom, RelationRelatedTo
+
+        # Step 1: Find important nodes using PageRank
+        logger.debug("📊 Step 1: Finding important nodes using PageRank...")
+
+        # Use PageRank to identify central nodes in the graph
+        relation_type = RelationRelatedTo
+        if relation_types:
+            # Map string to proper RelationType
+            relation_map = {
+                "is_a": "is_a",
+                "has_a": "has_a",
+                "related_to": "related_to",
+                "is_from": "is_from",
+            }
+            if relation_types[0] in relation_map:
+                relation_type = relation_types[0]  # type: ignore
+
+        pagerank_results = self.db.graph.pagerank(
+            relation=relation_type,  # type: ignore
+            limit=top_k * 10,  # Get more candidates for filtering
+            verbose=self.v(verbose),
+        )
+
+        if not pagerank_results:
+            logger.warning(
+                "⚠️ No PageRank results found, falling back to regular search"
+            )
+            return await self.search(
+                query,
+                top_k=top_k,
+                with_embedding=with_embedding,
+                verbose=self.v(verbose),
+            )
+
+        # Filter to get high-centrality nodes above threshold
+        important_nodes = []
+        max_pagerank = (
+            max(score for _, score in pagerank_results) if pagerank_results else 1.0
+        )
+
+        for node_id, pagerank_score in pagerank_results:
+            # Normalize score and filter by centrality threshold
+            normalized_score = pagerank_score / max_pagerank if max_pagerank > 0 else 0
+            if normalized_score >= centrality_threshold:
+                important_nodes.append((node_id, normalized_score))
+
+        if not important_nodes:
+            logger.warning(
+                "⚠️ No nodes above centrality threshold, using top-ranked nodes"
+            )
+            # Fallback: use top nodes regardless of threshold
+            important_nodes = [
+                (node_id, score / max_pagerank)
+                for node_id, score in pagerank_results[: top_k * 3]
+            ]
+
+        logger.info(
+            f"✅ Found {len(important_nodes)} important nodes for vector search"
+        )
+
+        # Step 2: Get documents related to these important nodes
+        logger.debug("🔍 Step 2: Performing vector search on important nodes...")
+
+        related_documents = set()
+        for node_id, graph_score in important_nodes:
+            try:
+                # Find documents connected to this entity node
+                # via "is_from" relationship
+                neighbors = self.db.graph.get_neighbors(
+                    to_node_id_or_label=node_id,
+                    relation=RelationIsFrom,
+                    limit=5,  # Limit documents per entity
+                    verbose=self.v(verbose),
+                )
+
+                for _, _, doc_node in neighbors:
+                    if doc_node.kind == "document":
+                        related_documents.add(doc_node.node_id)
+
+            except Exception as e:
+                logger.error(f"⚠️ Error getting neighbors for node {node_id}: {e}")
+                continue
+
+        if not related_documents:
+            logger.warning(
+                "⚠️ No related documents found, falling back to regular search"
+            )
+            return await self.search(
+                query,
+                top_k=top_k,
+                with_embedding=with_embedding,
+                verbose=self.v(verbose),
+            )
+
+        # Step 3: Vector search on the collected documents
+        logger.debug(
+            f"📈 Step 3: Vector search on {len(related_documents)} documents..."
+        )
+
+        # Get all points for the related documents
+        candidate_points: list["Point"] = []
+        # Limit to avoid too many candidates
+        for doc_id in list(related_documents)[:50]:
+            try:
+                points = self.db.points.gen(
+                    document_id=doc_id, limit=10, verbose=self.v(verbose)
+                )
+                candidate_points.extend(points)
+            except Exception as e:
+                logger.error(f"⚠️ Error getting points for document {doc_id}: {e}")
+                continue
+
+        if not candidate_points:
+            logger.warning(
+                "⚠️ No candidate points found, falling back to regular search"
+            )
+            return await self.search(
+                query,
+                top_k=top_k,
+                with_embedding=with_embedding,
+                verbose=self.v(verbose),
+            )
+
+        # Step 4: Calculate vector similarities and combine with graph scores
+        logger.debug("⚖️ Step 4: Calculating combined scores...")
+
+        # Get query embedding
+        query_vector = (
+            await SearchRequest.to_vectors(
+                [SearchRequest(query=query, top_k=1)],
+                model=self.model,
+                model_settings=self.model_settings,
+            )
+        )[0]
+
+        scored_candidates = []
+        for point in candidate_points:
+            try:
+                if not point.embedding:
+                    continue
+
+                point_vector = point.to_python()
+                vector_similarity = self._cosine_similarity(query_vector, point_vector)
+
+                # Find the document this point belongs to
+                doc = self.db.documents.retrieve(point.document_id, verbose=False)
+
+                # Get graph importance score for this document's related entities
+                graph_importance = 0.0
+                for node_id, node_score in important_nodes:
+                    try:
+                        # Check if this document is related to the important entity
+                        neighbors = self.db.graph.get_neighbors(
+                            from_node_id_or_label=doc.document_id,
+                            to_node_id_or_label=node_id,
+                            relation=RelationIsFrom,
+                            limit=1,
+                            verbose=False,
+                        )
+                        if neighbors:
+                            graph_importance = max(graph_importance, node_score)
+                    except Exception:
+                        continue
+
+                # Combined score: weighted average of vector similarity
+                # and graph importance
+                combined_score = (
+                    vector_weight * vector_similarity + graph_weight * graph_importance
+                )
+
+                scored_candidates.append((point, doc, combined_score))
+
+            except Exception as e:
+                logger.error(f"⚠️ Error processing point {point.point_id}: {e}")
+                continue
+
+        # Step 5: Return top-k results
+        scored_candidates.sort(key=lambda x: x[2], reverse=True)
+
+        logger.info(
+            f"✅ Graph-Guided Vector Search completed. "
+            f"Found {len(scored_candidates)} candidates."
+        )
+
+        return scored_candidates[:top_k]
 
     async def graph_rag_search_hybrid_scoring(
         self,
@@ -536,7 +736,7 @@ class DVS(DVSMixin):
         """
         Graph-RAG Strategy 4: Iterative Refinement
 
-        Initial search → Expand query based on results → Search again → Repeat until convergence  # noqa
+        Initial search → Expand query based on results → Search again → Repeat until convergence
 
         Args:
             query: Search query
@@ -548,7 +748,7 @@ class DVS(DVSMixin):
 
         Returns:
             Search results list [(Point, Document, relevance_score), ...]
-        """
+        """  # noqa: E501
         # TODO: Implement Strategy 4 - Iterative Refinement
         raise NotImplementedError("Strategy 4 not yet implemented")
 
@@ -566,7 +766,7 @@ class DVS(DVSMixin):
         Graph-RAG Strategy 5: Context-Aware Expansion
 
         Vector search → Analyze result relationships → Expand search scope based on relationships
-        → Filter irrelevant results  # noqa
+        → Filter irrelevant results
 
         Args:
             query: Search query
@@ -578,7 +778,7 @@ class DVS(DVSMixin):
 
         Returns:
             Search results list [(Point, Document, relevance_score), ...]
-        """
+        """  # noqa: E501
         # TODO: Implement Strategy 5 - Context-Aware Expansion
         raise NotImplementedError("Strategy 5 not yet implemented")
 
@@ -616,6 +816,8 @@ class DVS(DVSMixin):
         target_doc_id: str,
         original_doc_ids: list[str],
         related_entities: set[str],
+        *,
+        verbose: bool | None = None,
     ) -> float:
         """Calculate graph relevance for a document"""
         # Give higher score if document is in original search results
@@ -627,7 +829,9 @@ class DVS(DVSMixin):
 
         try:
             # Try to find target document node
-            target_node = self.db.graph.nodes.retrieve(target_doc_id, verbose=False)
+            target_node = self.db.graph.nodes.retrieve(
+                target_doc_id, verbose=self.v(verbose)
+            )
 
             for original_doc_id in original_doc_ids:
                 try:
