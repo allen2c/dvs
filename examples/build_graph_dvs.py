@@ -80,11 +80,11 @@ async def main():
 
     # --- Step 1: Document Loading ---
     console.rule("[bold blue]Step 1: Document Loading[/bold blue]")
-    documents = load_documents(documents_dir)
+    raw_documents = load_documents(documents_dir)
 
     # --- Step 2: Build DVS ---
     console.rule("[bold blue]Step 2: Build DVS[/bold blue]")
-    created_result = dvs_client.add(documents)
+    created_result = dvs_client.add(raw_documents)
     console.log(f"Created DVS result: {created_result}")
 
     # --- Step 2.5: Optional Draw embeddings on 2D plane ---
@@ -99,7 +99,7 @@ async def main():
     # --- Step 3: Build Graph ---
     console.rule("[bold blue]Step 3: Build Graph[/bold blue]")
     graph = await build_graph_from_documents(
-        documents,
+        [doc for doc in dvs_client.db.documents.gen(verbose=VERBOSE)],
         chat_model=chat_model,
         embeddings_model=emb_model,
         embeddings_model_settings=emb_settings,
@@ -308,6 +308,30 @@ async def main():
     print("")
     print("✨ Demo completed! Strategy 2 showcases how graphs can intelligently")
     print("   guide vector search to find more relevant and authoritative content.")
+
+    # --- Step 11: Graph-RAG Strategy 3 Demo ---
+    console.rule("[bold magenta]Step 11: Graph-RAG Strategy 3 Demo[/bold magenta]")
+    console.rule("[bold yellow]Strategy 3: Hybrid Scoring[/bold yellow]")
+
+    print("🎯 Strategy 3 combines:")
+    print("   Vector similarity + Graph importance (PageRank) + Graph distance")
+
+    try:
+        hybrid_results = await dvs_client.graph_rag_search_hybrid_scoring(
+            query=query,
+            top_k=3,
+            vector_weight=0.7,
+            graph_importance_weight=0.2,
+            graph_distance_weight=0.1,
+            verbose=VERBOSE,
+        )
+
+        print("\n📊 Results for Strategy 3 (Hybrid Scoring):")
+        for i, (point, doc, score) in enumerate(hybrid_results, 1):
+            print(f"   {i}. {doc.name}: {score:.3f}")
+            print(f"      Content: {doc.content[:100]}...")
+    except Exception as e:
+        print(f"⚠️ Error running Strategy 3: {e}")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ class Node(pydantic.BaseModel):
     )
     label: str = pydantic.Field(
         ...,
-        description="Label of the node.",
+        description="Label of the node. This is 'document_id' for document node.",
     )
     kind: typing.Literal["entity", "document"] = pydantic.Field(
         ...,

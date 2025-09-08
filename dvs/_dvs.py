@@ -354,7 +354,9 @@ class DVS(DVSMixin):
         for doc_id in document_ids:
             try:
                 # Try to find corresponding document node (label = document_id)
-                doc_node = self.db.graph.nodes.retrieve(doc_id, verbose=self.v(verbose))
+                doc_node = self.db.graph.nodes.retrieve_by_label(
+                    doc_id, verbose=self.v(verbose)
+                )
                 document_nodes.append(doc_node)
             except Exception:
                 # Skip if corresponding node not found
@@ -365,9 +367,11 @@ class DVS(DVSMixin):
         for doc_node in document_nodes:
             try:
                 # Find all entity nodes connected to this document
+                from dvs.types.edge import RelationIsFrom
+
                 neighbors = self.db.graph.get_neighbors(
-                    from_node_id_or_label=doc_node.node_id,
-                    relation="is_from",
+                    to_node_id_or_label=doc_node.node_id,
+                    relation=RelationIsFrom,
                     limit=10,
                     verbose=self.v(verbose),
                 )
@@ -386,9 +390,11 @@ class DVS(DVSMixin):
             for entity_id in list(related_entities)[:20]:  # Limit processing count
                 try:
                     # Find all document nodes connected to this entity
+                    from dvs.types.edge import RelationIsFrom
+
                     neighbors = self.db.graph.get_neighbors(
-                        to_node_id_or_label=entity_id,
-                        relation="is_from",
+                        from_node_id_or_label=entity_id,
+                        relation=RelationIsFrom,
                         limit=5,
                         verbose=self.v(verbose),
                     )
@@ -396,7 +402,8 @@ class DVS(DVSMixin):
                     # Collect new document IDs
                     for _, _, doc_node in neighbors:
                         if doc_node.kind == "document":
-                            expanded_document_ids.add(doc_node.node_id)
+                            # Use label as document_id
+                            expanded_document_ids.add(doc_node.label)
                 except Exception:
                     continue
 
@@ -575,7 +582,7 @@ class DVS(DVSMixin):
                 # Find documents connected to this entity node
                 # via "is_from" relationship
                 neighbors = self.db.graph.get_neighbors(
-                    to_node_id_or_label=node_id,
+                    from_node_id_or_label=node_id,
                     relation=RelationIsFrom,
                     limit=5,  # Limit documents per entity
                     verbose=self.v(verbose),
@@ -583,7 +590,8 @@ class DVS(DVSMixin):
 
                 for _, _, doc_node in neighbors:
                     if doc_node.kind == "document":
-                        related_documents.add(doc_node.node_id)
+                        # Use label as document_id
+                        related_documents.add(doc_node.label)
 
             except Exception as e:
                 logger.error(f"⚠️ Error getting neighbors for node {node_id}: {e}")
@@ -611,7 +619,10 @@ class DVS(DVSMixin):
         for doc_id in list(related_documents)[:50]:
             try:
                 points = self.db.points.gen(
-                    document_id=doc_id, limit=10, verbose=self.v(verbose)
+                    document_id=doc_id,
+                    limit=10,
+                    with_embedding=True,
+                    verbose=self.v(verbose),
                 )
                 candidate_points.extend(points)
             except Exception as e:
@@ -645,6 +656,7 @@ class DVS(DVSMixin):
         for point in candidate_points:
             try:
                 if not point.embedding:
+                    raise ValueError("Point has no embedding")
                     continue
 
                 point_vector = point.to_python()
@@ -658,9 +670,13 @@ class DVS(DVSMixin):
                 for node_id, node_score in important_nodes:
                     try:
                         # Check if this document is related to the important entity
+                        # Match by document label, not node_id
+                        doc_node = self.db.graph.nodes.retrieve_by_label(
+                            doc.document_id, verbose=False
+                        )
                         neighbors = self.db.graph.get_neighbors(
-                            from_node_id_or_label=doc.document_id,
-                            to_node_id_or_label=node_id,
+                            from_node_id_or_label=node_id,
+                            to_node_id_or_label=doc_node.node_id,
                             relation=RelationIsFrom,
                             limit=1,
                             verbose=False,
@@ -720,8 +736,90 @@ class DVS(DVSMixin):
         Returns:
             Search results list [(Point, Document, relevance_score), ...]
         """
-        # TODO: Implement Strategy 3 - Hybrid Scoring
-        raise NotImplementedError("Strategy 3 not yet implemented")
+        from dvs.types.edge import RelationIsFrom, RelationRelatedTo
+
+        # Step 1: Initial vector search to get candidate points
+        initial_results: list[tuple["Point", "Document", float]] = await self.search(
+            query=query,
+            top_k=max(1, top_k * 3),
+            with_embedding=with_embedding,
+            verbose=self.v(verbose),
+        )
+
+        if not initial_results:
+            return []
+
+        original_doc_ids: list[str] = [doc.document_id for _, doc, _ in initial_results]
+
+        # Step 2: Prepare PageRank-based graph importance
+        pagerank_results = self.db.graph.pagerank(
+            relation=RelationRelatedTo,  # Use general semantic connectivity
+            limit=top_k * 50,
+            verbose=self.v(verbose),
+        )
+
+        pagerank_map: dict[str, float] = {
+            node_id: score for node_id, score in pagerank_results
+        }
+        max_pagerank: float = max(pagerank_map.values()) if pagerank_map else 1.0
+
+        def get_graph_importance_for_document(document_id: str) -> float:
+            """Return normalized graph importance [0,1] for a document node."""
+            # Prefer PageRank on the document node directly if available
+            if document_id in pagerank_map and max_pagerank > 0:
+                return pagerank_map[document_id] / max_pagerank
+
+            # Otherwise, look at connected entity nodes via is_from and take max
+            try:
+                neighbors = self.db.graph.get_neighbors(
+                    to_node_id_or_label=document_id,
+                    relation=RelationIsFrom,
+                    limit=15,
+                    verbose=False,
+                )
+                best: float = 0.0
+                for _, _, to_node in neighbors:
+                    node_score = pagerank_map.get(to_node.node_id, 0.0)
+                    if max_pagerank > 0:
+                        best = max(best, node_score / max_pagerank)
+                return best
+            except Exception:
+                return 0.0
+
+        # Step 3: Compute distance-based score using shortest paths to originals
+        # Reuse _calculate_graph_relevance which maps distance to [0,1]
+        def get_graph_distance_score(document_id: str) -> float:
+            """Return distance score [0,1] derived from shortest path to seeds."""
+            return self._calculate_graph_relevance(
+                document_id,
+                original_doc_ids,
+                related_entities=set(),
+                verbose=False,
+            )
+
+        # Step 4: Combine scores
+        combined_results: list[tuple["Point", "Document", float]] = []
+
+        for point, doc, vector_score in initial_results:
+            try:
+                graph_importance: float = get_graph_importance_for_document(
+                    doc.document_id
+                )
+                graph_distance_score: float = get_graph_distance_score(doc.document_id)
+
+                combined_score: float = (
+                    vector_weight * float(vector_score)
+                    + graph_importance_weight * graph_importance
+                    + graph_distance_weight * graph_distance_score
+                )
+
+                combined_results.append((point, doc, combined_score))
+            except Exception:
+                continue
+
+        # Step 5: Sort and return top-k
+        combined_results.sort(key=lambda x: x[2], reverse=True)
+        return combined_results[:top_k]
 
     async def graph_rag_search_iterative_refinement(
         self,
@@ -829,13 +927,14 @@ class DVS(DVSMixin):
 
         try:
             # Try to find target document node
-            target_node = self.db.graph.nodes.retrieve(
+            # Resolve by label (document_id)
+            target_node = self.db.graph.nodes.retrieve_by_label(
                 target_doc_id, verbose=self.v(verbose)
             )
 
             for original_doc_id in original_doc_ids:
                 try:
-                    original_node = self.db.graph.nodes.retrieve(
+                    original_node = self.db.graph.nodes.retrieve_by_label(
                         original_doc_id, verbose=False
                     )
 
