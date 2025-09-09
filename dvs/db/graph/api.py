@@ -3,6 +3,7 @@ import functools
 import logging
 import pathlib
 import textwrap
+import time
 import typing
 from concurrent.futures import ThreadPoolExecutor
 
@@ -969,6 +970,9 @@ class Graph:
 
         from dvs.utils.cosine_similarity import cosine_similarity
 
+        # Start timing
+        start_time = time.perf_counter()
+
         # Step 1: Vector search - Find most relevant documents
         initial_results = await self.dvs.search(
             query=query,
@@ -1230,6 +1234,15 @@ class Graph:
                     strategy="vector_expansion",
                 )
             )
+
+        # End timing and log performance
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        logger.info(
+            f"🔍 [Strategy 1: vector_expansion] Query: '{query[:50]}...' | "
+            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
+        )
+
         return out
 
     async def search_graph_guided(
@@ -1280,6 +1293,9 @@ class Graph:
         """
         # no direct Relation import needed; using existing helpers
         from dvs.utils.cosine_similarity import cosine_similarity
+
+        # Start timing
+        start_time = time.perf_counter()
 
         # Step 1: Find important nodes using PageRank
         logger.debug("📊 Step 1: Finding important nodes using PageRank...")
@@ -1617,6 +1633,15 @@ class Graph:
                     strategy="graph_guided",
                 )
             )
+
+        # End timing and log performance
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        logger.info(
+            f"🔍 [Strategy 2: graph_guided] Query: '{query[:50]}...' | "
+            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
+        )
+
         return out
 
     async def search_hybrid_scoring(
@@ -1665,6 +1690,9 @@ class Graph:
         ```
         """
         # using helpers; no direct Relation imports needed here
+
+        # Start timing
+        start_time = time.perf_counter()
 
         # cosine_similarity not needed in Strategy 3
         # Step 1: Initial vector search to get candidate points
@@ -1759,6 +1787,15 @@ class Graph:
                     strategy="hybrid_scoring",
                 )
             )
+
+        # End timing and log performance
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        logger.info(
+            f"🔍 [Strategy 3: hybrid_scoring] Query: '{query[:50]}...' | "
+            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
+        )
+
         return out
 
     async def search_iterative_refinement(
@@ -1812,6 +1849,9 @@ class Graph:
         ```
         """
         # Relation imports not needed; using Graph helpers for expansion/suppression
+
+        # Start timing
+        start_time = time.perf_counter()
 
         if query_expander is None:
             raise ValueError("query_expander must be provided for LLM-based expansion.")
@@ -2010,6 +2050,15 @@ class Graph:
             for (_point, doc, score) in best_results[:top_k]
         ]
 
+        # End timing and log performance
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        logger.info(
+            f"🔍 [Strategy 4: iterative_refinement] Query: '{query[:50]}...' | "
+            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | "
+            f"Results: {len(output)} | Iterations: {iterations}"
+        )
+
         return output
 
     async def search_context_aware(
@@ -2058,6 +2107,9 @@ class Graph:
         ```
         """
         from dvs.utils.cosine_similarity import cosine_similarity
+
+        # Start timing
+        start_time = time.perf_counter()
 
         # 0) Baseline vector search to get seed context
         baseline_results: list[tuple[Point, Document, float]] = await self.dvs.search(
@@ -2331,6 +2383,15 @@ class Graph:
                     normalized_score=norm,
                 )
             )
+
+        # End timing and log performance
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        logger.info(
+            f"🔍 [Strategy 5: context_aware] Query: '{query[:50]}...' | "
+            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
+        )
+
         return out
 
     def calculate_graph_relevance(
