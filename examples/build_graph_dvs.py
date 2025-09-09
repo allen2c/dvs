@@ -175,7 +175,7 @@ async def main():
             top_k=topk,
             context_similarity_threshold=ctx_th,
             max_expansion_steps=1,
-            verbose=True,
+            verbose=VERBOSE,
         )
 
         print("\n📊 Unified Comparison (top-3):")

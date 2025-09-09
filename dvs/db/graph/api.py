@@ -107,7 +107,7 @@ class Graph:
         self.edges.drop(verbose=self.dvs.v(verbose))
         with Timer() as timer:
             conn = conn or self.dvs.new_connection()
-            conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+
             conn.cursor().sql(
                 f"DROP PROPERTY GRAPH IF EXISTS {dvs.DVS_GRAPH_TABLE_NAME}"
             )
@@ -245,7 +245,6 @@ class Graph:
             else [relation]
         )
         conn = conn or self.dvs.new_connection()
-        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         def run_query(
             query: str,
@@ -324,7 +323,6 @@ class Graph:
             else [relation]
         )
         conn = conn or self.dvs.new_connection()
-        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         def run_query(
             query: str,
@@ -395,7 +393,6 @@ class Graph:
         output: typing.List[typing.Tuple[typing.Text, float]] = []
 
         conn = conn or self.dvs.new_connection()
-        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         with Timer() as timer:
             query = textwrap.dedent(
@@ -442,7 +439,6 @@ class Graph:
         output: typing.List[typing.Tuple[typing.Text, int]] = []
 
         conn = conn or self.dvs.new_connection()
-        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         with Timer() as timer:
             query = textwrap.dedent(
@@ -490,7 +486,6 @@ class Graph:
         output: typing.List[typing.Tuple[typing.Text, float]] = []
 
         conn = conn or self.dvs.new_connection()
-        conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         with Timer() as timer:
             query = textwrap.dedent(
@@ -653,7 +648,12 @@ class Graph:
         if not entity_ids:
             return set()
         try:
-            pr = self.pagerank(conn=conn, relation=relation, limit=limit, verbose=False)
+            pr = self.pagerank(
+                conn=conn,
+                relation=relation,
+                limit=limit,
+                verbose=False,
+            )
             pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
             if not pr_map:
                 return set(entity_ids)
@@ -1032,6 +1032,9 @@ class Graph:
         # Start timing
         start_time = time.perf_counter()
 
+        # Ensure a single connection and load DuckPGQ once
+        conn = conn or self.dvs.new_connection()
+
         # Step 1: Vector search - Find most relevant documents
         initial_results = await self.dvs.search(
             query=query,
@@ -1077,6 +1080,7 @@ class Graph:
                 is_a_max_hops,
                 is_a_limit_per_hop,
                 cap_total=entity_expansion_cap,
+                conn=conn,
                 verbose=False,
             )
         if has_a_enabled and len(expanded_entity_ids) < entity_expansion_cap:
@@ -1084,6 +1088,7 @@ class Graph:
                 expanded_entity_ids,
                 has_a_limit_per_entity,
                 cap_total=entity_expansion_cap,
+                conn=conn,
                 verbose=False,
             )
 
@@ -1181,6 +1186,7 @@ class Graph:
             expanded_document_ids |= self.collect_docs_via_is_from(
                 set(list(expanded_entity_ids)[: min(len(expanded_entity_ids), 200)]),
                 per_entity_limit=docs_per_entity_limit,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
 
@@ -1235,50 +1241,58 @@ class Graph:
         # Step 6: Calculate vector similarity for candidate points
         query_vector: list[float] = await self.embed_query_vector(query)
 
-        scored_candidates = []
+        scored_candidates: list[tuple[Point, float]] = []
         for point in expanded_candidates:
             try:
-                point_vector = point.to_python()
-                # Calculate cosine similarity
-                similarity = cosine_similarity(query_vector, point_vector)
+                point_vector: list[float] = point.to_python()
+                similarity: float = cosine_similarity(query_vector, point_vector)
                 scored_candidates.append((point, similarity))
             except Exception:
                 continue
 
-        # Step 7: Calculate combined score (vector similarity + graph relevance)
-        final_results: list[tuple[Point, Document, float, float, float]] = []
-        for point, vector_score in scored_candidates:
+        # Group by document and keep best vector score per document
+        doc_best: dict[str, tuple[Point, float]] = {}
+        for point, vec_score in scored_candidates:
+            doc_id: str = point.document_id
+            prev: tuple[Point, float] | None = doc_best.get(doc_id)
+            if prev is None or vec_score > prev[1]:
+                doc_best[doc_id] = (point, vec_score)
+
+        # Preload Document objects once
+        doc_map: dict[str, Document] = {}
+        for doc_id in doc_best.keys():
             try:
-                doc = self.dvs.db.documents.retrieve(
-                    point.document_id, conn=conn, verbose=self.dvs.v(verbose)
+                doc_map[doc_id] = self.dvs.db.documents.retrieve(
+                    doc_id, conn=conn, verbose=self.dvs.v(verbose)
                 )
-
-                # Calculate graph relevance: based on distance to original
-                # query-related documents
-                graph_score = self.calculate_graph_relevance(
-                    point.document_id,
-                    document_ids,
-                    related_entities,
-                    verbose=self.dvs.v(verbose),
-                )
-
-                # Combined scoring
-                combined_score: float = vector_weight * float(
-                    vector_score
-                ) + graph_weight * float(graph_score)
-
-                final_results.append(
-                    (
-                        point,
-                        doc,
-                        combined_score,
-                        float(vector_score),
-                        float(graph_score),
-                    )
-                )
-
             except Exception:
                 continue
+
+        # Compute graph relevance once per document (use shared conn)
+        graph_score_map: dict[str, float] = {}
+        for doc_id in doc_best.keys():
+            try:
+                graph_score_map[doc_id] = self.calculate_graph_relevance(
+                    doc_id,
+                    document_ids,
+                    related_entities,
+                    conn=conn,
+                    verbose=self.dvs.v(verbose),
+                )
+            except Exception:
+                graph_score_map[doc_id] = 0.0
+
+        # Step 7: Combine scores at document level
+        final_results: list[tuple[Document, float, float]] = []
+        for doc_id, (_point, vec_score) in doc_best.items():
+            doc_obj: Document | None = doc_map.get(doc_id)
+            if doc_obj is None:
+                continue
+            gsc: float = float(graph_score_map.get(doc_id, 0.0))
+            combined_score: float = (
+                vector_weight * float(vec_score) + graph_weight * gsc
+            )
+            final_results.append((doc_obj, combined_score, float(vec_score)))
 
         # Step 8: Sort by combined score and return top-k
         final_results.sort(key=lambda x: x[2], reverse=True)
@@ -1286,14 +1300,14 @@ class Graph:
         # Normalize scores by top score
         max_score: float = float(top[0][2]) if top else 1.0
         out: list[GraphRAGResult] = []
-        for idx, (_p, doc, combined, vsc, gsc) in enumerate(top, start=1):
+        for idx, (doc, combined, vsc) in enumerate(top, start=1):
             norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
             out.append(
                 GraphRAGResult(
                     document=doc,
                     score=float(combined),
                     vector_score=float(vsc),
-                    graph_score=float(gsc),
+                    graph_score=None,
                     iterations=None,
                     rank=idx,
                     normalized_score=norm,
@@ -1305,8 +1319,11 @@ class Graph:
         end_time = time.perf_counter()
         duration_ms = (end_time - start_time) * 1000
         logger.info(
-            f"🔍 [Strategy 1: vector_expansion] Query: '{query[:50]}...' | "
-            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
+            (
+                f"🔍 [Strategy 1: vector_expansion] Query: '{query[:50]}...' | "
+                + f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | "
+                + f"Results: {len(out)}"
+            )
         )
 
         return out
@@ -2395,6 +2412,11 @@ class Graph:
                 for i, (_p, doc, sc) in enumerate(baseline_results[:top_k])
             ]
 
+        # Apply a hard cap to candidate docs to control latency
+        MAX_CANDIDATES: int = 200
+        if len(candidate_doc_ids) > MAX_CANDIDATES:
+            candidate_doc_ids = set(list(candidate_doc_ids)[:MAX_CANDIDATES])
+
         # 4) Score candidates by query similarity and context similarity
         alpha: float = 0.6  # weight for query-vs-candidate vector similarity
         beta: float = 0.4  # weight for context-vs-candidate similarity
@@ -2403,8 +2425,9 @@ class Graph:
         log_counter: int = 0
         for doc_id in list(candidate_doc_ids)[:500]:
             try:
+                # fewer points per doc for centroid to reduce DB calls
                 cand_centroid: list[float] = self.centroid_for_document(
-                    doc_id, conn=conn
+                    doc_id, conn=conn, limit_points=3
                 )
                 if not cand_centroid:
                     if self.dvs.v(verbose) and log_counter < 10:
