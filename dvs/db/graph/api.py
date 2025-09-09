@@ -402,6 +402,17 @@ class Graph:
         vector_weight: float = 0.7,
         graph_weight: float = 0.3,
         with_embedding: bool = False,
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        related_to_enabled: bool = True,
+        related_to_limit_per_entity: int = 1,
+        docs_per_entity_limit: int = 3,
+        entity_expansion_cap: int = 200,
+        suppress_hubs: bool = True,
+        hub_pagerank_top_percent: float = 0.1,
+        related_to_require_seed_touch: bool = True,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 1: vector search → graph expand → re-score (vector+graph).
@@ -440,7 +451,7 @@ class Graph:
                 continue
 
         # Step 3: Find related entity nodes through "is_from" relationship
-        related_entities = set()
+        related_entities: set[str] = set()
         for doc_node in document_nodes:
             try:
                 # Find all entity nodes connected to this document
@@ -460,11 +471,191 @@ class Graph:
             except Exception:
                 continue
 
+        # Step 3b: Expand entities using is_a (multi-hop as synonym),
+        #          has_a (1-hop), related_to (1-hop)
+        #  - is_a: treat as equivalence; explore both directions up to is_a_max_hops
+        #  - has_a: 1-hop in both directions; limited fanout
+        #  - related_to: 1-hop in both directions; limited fanout (stricter)
+        expanded_entity_ids: set[str] = set(related_entities)
+
+        # is_a multi-hop BFS (both directions)
+        if is_a_max_hops > 0 and len(expanded_entity_ids) < entity_expansion_cap:
+            current_frontier: set[str] = set(related_entities)
+            visited: set[str] = set(related_entities)
+            for _hop in range(is_a_max_hops):
+                if (
+                    not current_frontier
+                    or len(expanded_entity_ids) >= entity_expansion_cap
+                ):
+                    break
+                next_frontier: set[str] = set()
+                for eid in list(current_frontier):
+                    try:
+                        out_neighbors = self.dvs.db.graph.get_neighbors(
+                            from_node_id_or_label=eid,
+                            relation=RelationIsA,
+                            limit=is_a_limit_per_hop,
+                            verbose=False,
+                        )
+                    except Exception:
+                        out_neighbors = []
+                    try:
+                        in_neighbors = self.dvs.db.graph.get_neighbors(
+                            to_node_id_or_label=eid,
+                            relation=RelationIsA,
+                            limit=is_a_limit_per_hop,
+                            verbose=False,
+                        )
+                    except Exception:
+                        in_neighbors = []
+
+                    all_neighbors = list(out_neighbors) + list(in_neighbors)
+                    for from_node, _edge, to_node in all_neighbors:
+                        other = to_node if from_node.node_id == eid else from_node
+                        if getattr(other, "kind", None) == "entity":
+                            oid: str = other.node_id
+                            if oid not in visited:
+                                expanded_entity_ids.add(oid)
+                                visited.add(oid)
+                                next_frontier.add(oid)
+                                if len(expanded_entity_ids) >= entity_expansion_cap:
+                                    break
+                    if len(expanded_entity_ids) >= entity_expansion_cap:
+                        break
+                current_frontier = next_frontier
+
+        # has_a 1-hop (both directions)
+        if has_a_enabled and len(expanded_entity_ids) < entity_expansion_cap:
+            seeds_for_has_a: list[str] = list(expanded_entity_ids)[
+                :entity_expansion_cap
+            ]
+            for eid in seeds_for_has_a:
+                try:
+                    out_neighbors = self.dvs.db.graph.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationHasA,
+                        limit=has_a_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    out_neighbors = []
+                try:
+                    in_neighbors = self.dvs.db.graph.get_neighbors(
+                        to_node_id_or_label=eid,
+                        relation=RelationHasA,
+                        limit=has_a_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    in_neighbors = []
+
+                for from_node, _edge, to_node in list(out_neighbors) + list(
+                    in_neighbors
+                ):
+                    other = to_node if from_node.node_id == eid else from_node
+                    if getattr(other, "kind", None) == "entity":
+                        expanded_entity_ids.add(other.node_id)
+                        if len(expanded_entity_ids) >= entity_expansion_cap:
+                            break
+                if len(expanded_entity_ids) >= entity_expansion_cap:
+                    break
+
+        # related_to 1-hop (both directions, stricter fanout)
+        if related_to_enabled and len(expanded_entity_ids) < entity_expansion_cap:
+            seeds_for_related: list[str] = list(expanded_entity_ids)[
+                :entity_expansion_cap
+            ]
+            seed_doc_ids_set: set[str] = set(document_ids)
+            touch_cache: dict[str, bool] = {}
+
+            def _entity_touches_seed(entity_id: str) -> bool:
+                """Check if entity connects to any seed doc via is_from."""
+                cached = touch_cache.get(entity_id)
+                if cached is not None:
+                    return cached
+                ok: bool = False
+                try:
+                    neighbors = self.dvs.db.graph.get_neighbors(
+                        from_node_id_or_label=entity_id,
+                        relation=typing.cast(RelationType, RelationIsFrom),
+                        limit=5,
+                        verbose=False,
+                    )
+                    for _fn, _edge, to_node in neighbors:
+                        is_doc: bool = getattr(to_node, "kind", None) == "document"
+                        if is_doc and (to_node.label in seed_doc_ids_set):
+                            ok = True
+                            break
+                except Exception:
+                    ok = False
+                touch_cache[entity_id] = ok
+                return ok
+
+            for eid in seeds_for_related:
+                try:
+                    out_neighbors = self.dvs.db.graph.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationRelatedTo,
+                        limit=related_to_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    out_neighbors = []
+                try:
+                    in_neighbors = self.dvs.db.graph.get_neighbors(
+                        to_node_id_or_label=eid,
+                        relation=RelationRelatedTo,
+                        limit=related_to_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    in_neighbors = []
+
+                for from_node, _edge, to_node in list(out_neighbors) + list(
+                    in_neighbors
+                ):
+                    other = to_node if from_node.node_id == eid else from_node
+                    if getattr(other, "kind", None) == "entity":
+                        needs_touch: bool = (
+                            related_to_require_seed_touch
+                            and not _entity_touches_seed(other.node_id)
+                        )
+                        if needs_touch:
+                            continue
+                        expanded_entity_ids.add(other.node_id)
+                        if len(expanded_entity_ids) >= entity_expansion_cap:
+                            break
+                if len(expanded_entity_ids) >= entity_expansion_cap:
+                    break
+
+        # Hub suppression using PageRank over related_to graph
+        if suppress_hubs and expanded_entity_ids:
+            try:
+                pr = self.dvs.db.graph.pagerank(
+                    relation=RelationRelatedTo, limit=5000, verbose=False
+                )
+                pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
+                if pr_map:
+                    scores: list[float] = sorted(pr_map.values(), reverse=True)
+                    pct: float = max(0.0, min(1.0, hub_pagerank_top_percent))
+                    idx: int = max(0, min(len(scores) - 1, int(len(scores) * pct) - 1))
+                    cutoff: float = scores[idx]
+                    expanded_entity_ids = {
+                        eid
+                        for eid in expanded_entity_ids
+                        if pr_map.get(eid, 0.0) < cutoff
+                    }
+            except Exception:
+                pass
+
         # Step 4: Graph expansion on these entity nodes to find more related documents
-        expanded_document_ids = set(document_ids)
+        expanded_document_ids: set[str] = set(document_ids)
 
         if graph_expansion_depth > 0:
-            for entity_id in list(related_entities)[:20]:  # Limit processing count
+            # Expand from all collected entities, respecting caps
+            for entity_id in list(expanded_entity_ids)[
+                : min(len(expanded_entity_ids), 200)
+            ]:
                 try:
                     # Find all document nodes connected to this entity
                     from dvs.types.edge import RelationIsFrom
@@ -472,7 +663,7 @@ class Graph:
                     neighbors = self.dvs.db.graph.get_neighbors(
                         from_node_id_or_label=entity_id,
                         relation=RelationIsFrom,
-                        limit=5,
+                        limit=docs_per_entity_limit,
                         verbose=self.dvs.v(verbose),
                     )
 
