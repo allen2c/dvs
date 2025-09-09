@@ -163,7 +163,7 @@ async def main():
         return s
 
     try:
-        s1 = await dvs_client.graph_rag_search_vector_expansion(
+        s1 = await dvs_client.db.graph.graph_rag_search_vector_expansion(
             query,
             top_k=topk,
             graph_expansion_depth=graph_depth,
@@ -172,7 +172,7 @@ async def main():
             verbose=VERBOSE,
         )
 
-        s2 = await dvs_client.graph_rag_search_graph_guided(
+        s2 = await dvs_client.db.graph.graph_rag_search_graph_guided(
             query,
             top_k=topk,
             centrality_threshold=centrality_th,
@@ -181,7 +181,7 @@ async def main():
             verbose=VERBOSE,
         )
 
-        s3 = await dvs_client.graph_rag_search_hybrid_scoring(
+        s3 = await dvs_client.db.graph.graph_rag_search_hybrid_scoring(
             query,
             top_k=topk,
             vector_weight=hybrid_vec_w,
@@ -197,7 +197,7 @@ async def main():
             verbose=VERBOSE,
         )
 
-        s4 = await dvs_client.graph_rag_search_iterative_refinement(
+        s4 = await dvs_client.db.graph.graph_rag_search_iterative_refinement(
             query,
             top_k=topk,
             max_iterations=1,
@@ -207,7 +207,7 @@ async def main():
             verbose=VERBOSE,
         )
 
-        s5 = await dvs_client.graph_rag_search_context_aware(
+        s5 = await dvs_client.db.graph.graph_rag_search_context_aware(
             query,
             top_k=topk,
             context_similarity_threshold=ctx_th,
