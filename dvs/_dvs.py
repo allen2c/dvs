@@ -169,6 +169,7 @@ class DVS:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         with_embedding: bool = False,
         verbose: bool | None = None,
     ) -> list[tuple["Point", "Document", float]]:
@@ -200,7 +201,7 @@ class DVS:
             embedding_dimensions=self.db_manifest.embedding_dimensions,
             documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
             points_table_name=dvs.DVS_POINTS_TABLE_NAME,
-            conn=self.new_connection(read_only=True),
+            conn=conn or self.new_connection(read_only=True),
             with_embedding=search_req.with_embedding,
             debug=self.v(verbose),
             console=self.settings.console,

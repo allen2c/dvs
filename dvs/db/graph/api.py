@@ -1037,6 +1037,7 @@ class Graph:
             query=query,
             top_k=top_k * 2,  # Expand candidate set
             with_embedding=with_embedding,
+            conn=conn,
             verbose=self.dvs.v(verbose),
         )
 
@@ -1202,6 +1203,7 @@ class Graph:
             expanded_document_ids,
             per_doc_limit=10,
             with_embedding=True,
+            conn=conn,
             verbose=self.dvs.v(verbose),
         ):
             if point.embedding:
@@ -1395,6 +1397,7 @@ class Graph:
                 query,
                 top_k=top_k,
                 with_embedding=with_embedding,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
             max_score: float = float(base[0][2]) if base else 1.0
@@ -1565,6 +1568,7 @@ class Graph:
                 query,
                 top_k=top_k,
                 with_embedding=with_embedding,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
             max_score: float = float(base[0][2]) if base else 1.0
@@ -1592,6 +1596,7 @@ class Graph:
             list(related_documents)[:50],
             per_doc_limit=10,
             with_embedding=True,
+            conn=conn,
             verbose=self.dvs.v(verbose),
         )
 
@@ -1603,6 +1608,7 @@ class Graph:
                 query,
                 top_k=top_k,
                 with_embedding=with_embedding,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
             max_score: float = float(base[0][2]) if base else 1.0
@@ -1770,6 +1776,7 @@ class Graph:
                 query=query,
                 top_k=max(1, top_k * 3),
                 with_embedding=with_embedding,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
         )
@@ -2192,6 +2199,7 @@ class Graph:
             query=query,
             top_k=max(1, top_k),
             with_embedding=True,  # need embeddings to compute centroids
+            conn=conn,
             verbose=self.dvs.v(verbose),
         )
 
@@ -2264,7 +2272,7 @@ class Graph:
             )
 
         # Query embedding (for vector similarity against candidates)
-        query_vector: list[float] = await self.embed_query_vector(query)
+        query_vector: list[float] = await self.embed_query_vector(query, conn=conn)
 
         # 2) Single-step graph expansion via entities (is_from)
         #    Optionally respect max_expansion_steps>0; here we perform one step.
@@ -2334,7 +2342,11 @@ class Graph:
 
         # 3) Collect candidate documents from these entities
         candidate_doc_ids: set[str] = self.collect_docs_via_is_from(
-            expanded_entities5, per_entity_limit=8, cap_entities=300, verbose=False
+            expanded_entities5,
+            per_entity_limit=8,
+            cap_entities=300,
+            conn=conn,
+            verbose=False,
         )
 
         # Remove seeds from candidates
