@@ -16,12 +16,8 @@ from rich.console import Console
 
 import dvs
 from dvs.types.document import Document
-from dvs.types.edge import Edge
 from dvs.types.graphrag_result import GraphRAGResult
-from dvs.types.node import Node
-from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
-from dvs.utils.loads_graph import load_graph
 from dvs.utils.query_expander import build_llm_query_expander
 
 VERBOSE = False
@@ -88,32 +84,18 @@ async def main():
 
     # --- Step 3: Build Graph ---
     console.rule("[bold blue]Step 3: Build Graph[/bold blue]")
-    graph = await dvs_client.db.graph.rebuild_graph(
+    await dvs_client.db.graph.rebuild_graph(
         chat_model=chat_model,
         document_semaphore=asyncio.Semaphore(MAX_CONCURRENCY),
         model_semaphore=asyncio.Semaphore(MAX_CONCURRENCY),
         verbose=VERBOSE,
     )
-
-    dump_graph(graph, data_root.joinpath(f"{graph_stem_name}.json"), format="node_link")
-    graph_path = dump_graph(
-        graph, data_root.joinpath(f"{graph_stem_name}.gexf"), format="gexf"
+    dvs_client.db.graph.export(
+        data_root.joinpath(f"{graph_stem_name}.json"), format="node_link"
     )
-    graph = load_graph(graph_path, format="gexf")  # noqa
-    console.log(f"Built Graph: {graph_path}")
-
-    # --- Step 3.5: Read Graph from file ---
-    console.rule("[bold blue]Step 3.5: Read Graph from file[/bold blue]")
-    graph_path = data_root.joinpath(f"{graph_stem_name}.gexf")
-    graph = load_graph(graph_path, format="gexf")
-    console.log(f"Read Graph: {graph_path}")
-    nodes: list[Node] = [
-        Node.model_validate(node_data) for _, node_data in graph.nodes(data=True)
-    ]
-    edges: list[Edge] = [
-        Edge.model_validate(edge_data) for _, _, edge_data in graph.edges(data=True)
-    ]
-    console.log(f"Nodes: {len(nodes)}, Edges: {len(edges)}")
+    dvs_client.db.graph.export(
+        data_root.joinpath(f"{graph_stem_name}.gexf"), format="gexf"
+    )
 
     # --- Step 4: Unified Graph-RAG Comparison (Strategies 1-5) ---
     console.rule(

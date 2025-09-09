@@ -230,7 +230,7 @@ class Nodes:
         if where_clauses:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
-        query += f"ORDER BY document_id {order.upper()}\n"
+        query += f"ORDER BY node_id {order.upper()}\n"
 
         # Fetch one more than the limit to determine if there are more results
         fetch_limit = limit + 1

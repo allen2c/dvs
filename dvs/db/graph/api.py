@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import logging
+import pathlib
 import textwrap
 import typing
 from concurrent.futures import ThreadPoolExecutor
@@ -167,6 +168,30 @@ class Graph:
         logger.info("✨ Knowledge Graph Construction Complete! ✨")
         logger.info(f"Total Nodes: {len(nodes)}, Edges: {len(edges)}")
         return G
+
+    def to_nx(self) -> "nx.DiGraph":
+        import networkx as nx
+
+        G = nx.DiGraph()
+        for __node in self.nodes.gen():
+            G.add_node(__node.node_id, **__node.model_dump())
+        for __edge in self.edges.gen(relation=RelationIsA):
+            G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
+        for __edge in self.edges.gen(relation=RelationHasA):
+            G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
+        for __edge in self.edges.gen(relation=RelationRelatedTo):
+            G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
+        for __edge in self.edges.gen(relation=RelationIsFrom):
+            G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
+        return G
+
+    def export(
+        self, path: pathlib.Path | str, *, format: typing.Literal["node_link", "gexf"]
+    ) -> pathlib.Path:
+        from dvs.utils.dump_graph import dump_graph
+
+        G = self.to_nx()
+        return dump_graph(G, path, format=format)
 
     @functools.cached_property
     def nodes(self) -> "Nodes":
