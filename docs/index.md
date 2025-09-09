@@ -176,3 +176,119 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 If you encounter any issues or have questions, please [open an issue](https://github.com/allen2c/dvs/issues) on GitHub.
+
+## GraphRAG Strategies (Overview)
+
+Below is a concise overview of five GraphRAG strategies used in `dvs`. Each diagram mirrors the inline docstrings to aid quick understanding.
+
+### Strategy 1: Vector Expansion
+
+- Expand entities near seed docs via `is_from`, `is_a`, `has_a` (optional `related_to`).
+- Combine vector similarity and graph relevance to rank.
+
+```mermaid
+flowchart TD
+    Q[Query] --> VS[Vector Search x2 top-k]
+    VS --> Seeds[Seed Documents]
+    Seeds --> E0[Entities via is_from]
+    E0 -->|is_a BFS| E1[Expanded Entities]
+    E1 -->|has_a 1-hop| E2[Expanded Entities]
+    E2 -->|related_to 1-hop optional| E3[Expanded Entities]
+    E3 --> Docs[Collect Docs via is_from]
+    Docs --> Cand[Candidate Points]
+    Q --> Embed[Embed Query]
+    Cand --> VSim[Vector Similarity]
+    Docs --> GRel[Graph Relevance to Seeds]
+    VSim --> Combine[Weighted Sum]
+    GRel --> Combine
+    Combine --> TopK[Top-k Results]
+```
+
+### Strategy 2: Graph-Guided
+
+- Use PageRank(RelatedTo) to select salient entities; expand lightly.
+- Combine vector similarity and graph importance.
+
+```mermaid
+flowchart TD
+    Q[Query] --> PR[PageRank RelatedTo]
+    PR --> Important[Select Important Entities]
+    Important -->|is_a BFS| E1[Expanded Entities]
+    E1 -->|has_a 1-hop| E2[Expanded Entities]
+    E2 --> Docs[Collect Docs via is_from]
+    Docs --> Cand[Candidate Points]
+    Q --> Embed[Embed Query]
+    Cand --> VSim[Vector Similarity]
+    Important --> GImp[Graph Importance]
+    VSim --> Combine[Weighted Sum]
+    GImp --> Combine
+    Combine --> TopK[Top-k Results]
+```
+
+### Strategy 3: Hybrid Scoring
+
+- Start with vector candidates, then add PageRank-based importance and shortest-path distance.
+- Weighted blend produces final ranking.
+
+```mermaid
+flowchart TD
+    Q[Query] --> VS[Vector Search x3 top-k]
+    VS --> Seeds[Original Docs]
+    Seeds --> OIDs[Original Doc IDs]
+    PR[PageRank RelatedTo] --> ImpMap[Importance Map]
+    OIDs --> Dist[Shortest Path Distance]
+    VS --> Cand[Candidates]
+    Cand --> VScore[Vector Score]
+    ImpMap --> GImp[Graph Importance]
+    Dist --> GDist[Graph Distance]
+    VScore --> Combine[Weighted Sum]
+    GImp --> Combine
+    GDist --> Combine
+    Combine --> TopK[Top-k Results]
+```
+
+### Strategy 4: Iterative Refinement
+
+- Iterate: LLM expand → embed → combine with graph → re-search until improvement small.
+
+```mermaid
+flowchart TD
+    Q[Query] --> Embed0[Embed Base]
+    Embed0 --> VS0[Baseline Vector Search]
+    VS0 --> Loop{Improvement > threshold and iters < max?}
+    Loop -- Yes --> LLM[LLM Expand Queries]
+    LLM --> EmbedX[Embed Expansions]
+    VS0 --> Seeds[Best Docs]
+    Seeds --> Ent[Entities via is_from]
+    Ent -->|is_a/has_a| E[Expanded Entities]
+    E --> Docs[Collect Docs]
+    Docs --> GVecs[Graph Vectors]
+    Embed0 --> Cmp[Combine Vectors]
+    EmbedX --> Cmp
+    GVecs --> Cmp
+    Cmp --> VS1[Refined Vector Search]
+    VS1 --> Loop
+    Loop -- No --> Out[Best Results]
+```
+
+### Strategy 5: Context-Aware
+
+- Build centroid from seeds; expand via entities; filter candidates by context similarity.
+
+```mermaid
+flowchart TD
+    Q[Query] --> VS[Baseline Vector Search]
+    VS --> Seeds[Seed Points + Docs]
+    Seeds --> Ctx[Compute Context Centroid]
+    Seeds --> Ent[Entities via is_from]
+    Ent -->|is_a/has_a| E[Expanded Entities]
+    E --> Docs[Collect Candidate Docs]
+    Docs --> Cent[Doc Centroids]
+    Q --> Embed[Embed Query]
+    Cent --> QSim[Query vs Doc Similarity]
+    Ctx --> CSim[Context vs Doc Similarity]
+    QSim --> Filter[Context Threshold]
+    CSim --> Filter
+    Filter --> Rank[Rank and Normalize]
+    Rank --> TopK[Top-k Results]
+```

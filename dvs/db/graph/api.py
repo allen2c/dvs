@@ -829,10 +829,32 @@ class Graph:
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 1: vector search → graph expand → re-score (vector+graph).
+        Expand seed entities via is_from, is_a, has_a (and optional related_to),
+        collect more docs, then combine vector and graph relevance for ranking.
+
         Pros: simple; leverages entities near seed docs; explainable via edges.
         Cons: sensitive to initial recall; may drift and pull hubs; extra passes.
         Use when: you want quick recall boost from doc-seeded entities and moderate
         latency is acceptable; centrality metrics are unavailable.
+
+        Diagram (Mermaid):
+        ```mermaid
+        flowchart TD
+            Q[Query] --> VS[Vector Search x2 top-k]
+            VS --> Seeds[Seed Documents]
+            Seeds --> E0[Entities via is_from]
+            E0 -->|is_a BFS| E1[Expanded Entities]
+            E1 -->|has_a 1-hop| E2[Expanded Entities]
+            E2 -->|related_to 1-hop optional| E3[Expanded Entities]
+            E3 --> Docs[Collect Docs via is_from]
+            Docs --> Cand[Candidate Points]
+            Q --> Embed[Embed Query]
+            Cand --> VSim[Vector Similarity]
+            Docs --> GRel[Graph Relevance to Seeds]
+            VSim --> Combine[Weighted Sum]
+            GRel --> Combine
+            Combine --> TopK[Top-k Results]
+        ```
         """
 
         from dvs.utils.cosine_similarity import cosine_similarity
@@ -1120,11 +1142,31 @@ class Graph:
         hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 2: PageRank-guided; vector over salient nodes, combine scores.
+        """Strategy 2: PageRank-guided vector search over salient entities.
+        Select high-centrality entities, expand lightly, collect related docs,
+        then combine vector similarity with graph importance for ranking.
+
         Pros: robust for ambiguous queries; targets globally important graph areas.
         Cons: depends on centrality quality; may miss niche items; algo overhead.
         Use when: graph is rich and centrality is meaningful; discovery-oriented
         retrieval benefits from salient-node guidance.
+
+        Diagram (Mermaid):
+        ```mermaid
+        flowchart TD
+            Q[Query] --> PR[PageRank RelatedTo]
+            PR --> Important[Select Important Entities]
+            Important -->|is_a BFS| E1[Expanded Entities]
+            E1 -->|has_a 1-hop| E2[Expanded Entities]
+            E2 --> Docs[Collect Docs via is_from]
+            Docs --> Cand[Candidate Points]
+            Q --> Embed[Embed Query]
+            Cand --> VSim[Vector Similarity]
+            Important --> GImp[Graph Importance]
+            VSim --> Combine[Weighted Sum]
+            GImp --> Combine
+            Combine --> TopK[Top-k Results]
+        ```
         """
         # no direct Relation import needed; using existing helpers
         from dvs.utils.cosine_similarity import cosine_similarity
@@ -1485,11 +1527,32 @@ class Graph:
         hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 3: weighted blend of vector, graph importance, and distance.
+        """Strategy 3: weighted blend of vector score, graph importance, distance.
+        Start with vector candidates, add PageRank-based importance and
+        shortest-path distance to seed docs, then combine by weights.
+
         Pros: balances precision/recall; uses structure+semantics; explainable parts.
         Cons: needs weight tuning; adds PR/shortest-path cost; double-count risk.
         Use when: you can calibrate weights offline and want stable cross-domain
         performance.
+
+        Diagram (Mermaid):
+        ```mermaid
+        flowchart TD
+            Q[Query] --> VS[Vector Search x3 top-k]
+            VS --> Seeds[Original Docs]
+            Seeds --> OIDs[Original Doc IDs]
+            PR[PageRank RelatedTo] --> ImpMap[Importance Map]
+            OIDs --> Dist[Shortest Path Distance]
+            VS --> Cand[Candidates]
+            Cand --> VScore[Vector Score]
+            ImpMap --> GImp[Graph Importance]
+            Dist --> GDist[Graph Distance]
+            VScore --> Combine[Weighted Sum]
+            GImp --> Combine
+            GDist --> Combine
+            Combine --> TopK[Top-k Results]
+        ```
         """
         # using helpers; no direct Relation imports needed here
 
@@ -1608,11 +1671,35 @@ class Graph:
         hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 4: iterate expand→embed→search until improvement is small.
+        """Strategy 4: iterate expand → embed → search until gains are small.
+        LLM expands queries; graph adds new docs via entities; merge vectors and
+        re-search; stop on low improvement or max iterations.
+
         Pros: escapes local minima; adapts via feedback; good for exploration.
         Cons: multi-round latency; expander quality critical; tuning convergence.
         Use when: batch/offline or higher-latency is fine; need high recall and
         adaptive retrieval.
+
+        Diagram (Mermaid):
+        ```mermaid
+        flowchart TD
+            Q[Query] --> Embed0[Embed Base]
+            Embed0 --> VS0[Baseline Vector Search]
+            VS0 --> Loop{Improvement > threshold and iters < max?}
+            Loop -- Yes --> LLM[LLM Expand Queries]
+            LLM --> EmbedX[Embed Expansions]
+            VS0 --> Seeds[Best Docs]
+            Seeds --> Ent[Entities via is_from]
+            Ent -->|is_a/has_a| E[Expanded Entities]
+            E --> Docs[Collect Docs]
+            Docs --> GVecs[Graph Vectors]
+            Embed0 --> Cmp[Combine Vectors]
+            EmbedX --> Cmp
+            GVecs --> Cmp
+            Cmp --> VS1[Refined Vector Search]
+            VS1 --> Loop
+            Loop -- No --> Out[Best Results]
+        ```
         """
         # Relation imports not needed; using Graph helpers for expansion/suppression
 
@@ -1833,10 +1920,32 @@ class Graph:
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 5: baseline seeds → is_from expand → context-centroid ranking.
+        Build a centroid from seed points, expand via entities, filter by context
+        similarity, then rank with a blend of query and context similarity.
+
         Pros: low-latency; mitigates semantic drift via context filter; explainable.
         Cons: needs embeddings; sparse graphs reduce gains; threshold sensitive.
         Use when: you prefer contextual precision with tight latency and minimal
         global graph prerequisites; hub suppression optional.
+
+        Diagram (Mermaid):
+        ```mermaid
+        flowchart TD
+            Q[Query] --> VS[Baseline Vector Search]
+            VS --> Seeds[Seed Points + Docs]
+            Seeds --> Ctx[Compute Context Centroid]
+            Seeds --> Ent[Entities via is_from]
+            Ent -->|is_a/has_a| E[Expanded Entities]
+            E --> Docs[Collect Candidate Docs]
+            Docs --> Cent[Doc Centroids]
+            Q --> Embed[Embed Query]
+            Cent --> QSim[Query vs Doc Similarity]
+            Ctx --> CSim[Context vs Doc Similarity]
+            QSim --> Filter[Context Threshold]
+            CSim --> Filter
+            Filter --> Rank[Rank and Normalize]
+            Rank --> TopK[Top-k Results]
+        ```
         """
         from dvs.utils.cosine_similarity import cosine_similarity
 
