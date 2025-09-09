@@ -105,4 +105,7 @@ class DB:
         """
         from dvs.db.graph.api import Graph
 
+        if not self.dvs.enable_graph:
+            raise ValueError("Graph is not enabled")
+
         return Graph(self.dvs)
