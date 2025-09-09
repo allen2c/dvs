@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import logging
 import textwrap
@@ -15,11 +16,9 @@ from dvs.types.edge import (
     RelationRelatedTo,
     RelationType,
 )
-from dvs.types.encoding_type import EncodingType
 from dvs.types.graphrag_result import GraphRAGResult
 from dvs.types.node import Node as NodeType
 from dvs.types.point import Point
-from dvs.types.search_request import SearchRequest
 from dvs.utils.debug_print import debug_print
 from dvs.utils.sql_stmts import SQL_STMT_LOAD_DUCKPGQ
 from dvs.utils.timer import Timer
@@ -628,6 +627,10 @@ class Graph:
                 if len(expanded_entity_ids) >= entity_expansion_cap:
                     break
 
+        # Counters for logging
+        seeds_count: int = len(related_entities)
+        pre_hub_entities_count: int = len(expanded_entity_ids)
+
         # Hub suppression using PageRank over related_to graph
         if suppress_hubs and expanded_entity_ids:
             try:
@@ -675,6 +678,19 @@ class Graph:
                 except Exception:
                     continue
 
+        # Compute summary counts and log (verbose)
+        suppressed_count: int = pre_hub_entities_count - len(expanded_entity_ids)
+        added_docs_count: int = len(expanded_document_ids.difference(set(document_ids)))
+        if self.dvs.v(verbose):
+            logger.info(
+                (
+                    f"[S1] seeds={seeds_count} "
+                    f"entities_after={len(expanded_entity_ids)} "
+                    f"suppressed={suppressed_count} "
+                    f"docs_added={added_docs_count}"
+                )
+            )
+
         # Step 5: Re-vector search on expanded document collection
         expanded_candidates = []
         for doc_id in expanded_document_ids:
@@ -713,13 +729,13 @@ class Graph:
             return wrapped
 
         # Step 6: Calculate vector similarity for candidate points
-        query_vector = (
-            await SearchRequest.to_vectors(
-                [SearchRequest(query=query, top_k=1)],
-                model=self.dvs.model,
+        query_vector: list[float] = (
+            await asyncio.to_thread(
+                self.dvs.model.get_embeddings,
+                query,
                 model_settings=self.dvs.model_settings,
             )
-        )[0]
+        ).to_python()[0]
 
         scored_candidates = []
         for point in expanded_candidates:
@@ -798,6 +814,14 @@ class Graph:
         vector_weight: float = 0.6,
         graph_weight: float = 0.4,
         with_embedding: bool = False,
+        # Expansion and hub controls
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        related_to_limit_per_entity: int = 1,
+        suppress_hubs: bool = True,
+        hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 2: PageRank-guided; vector over salient nodes, combine scores.
@@ -806,7 +830,12 @@ class Graph:
         Use when: graph is rich and centrality is meaningful; discovery-oriented
         retrieval benefits from salient-node guidance.
         """
-        from dvs.types.edge import RelationIsFrom, RelationRelatedTo
+        from dvs.types.edge import (
+            RelationHasA,
+            RelationIsA,
+            RelationIsFrom,
+            RelationRelatedTo,
+        )
         from dvs.utils.cosine_similarity import cosine_similarity
 
         # Step 1: Find important nodes using PageRank
@@ -884,27 +913,124 @@ class Graph:
 
         # Step 2: Get documents related to these important nodes
         logger.debug("🔍 Step 2: Performing vector search on important nodes...")
+        # Expand entities: is_a multi-hop and has_a 1-hop
+        expanded_entities: set[str] = {nid for (nid, _score) in important_nodes}
 
-        related_documents = set()
-        for node_id, graph_score in important_nodes:
+        # is_a BFS both directions
+        if is_a_max_hops > 0:
+            frontier: set[str] = set(expanded_entities)
+            visited: set[str] = set(expanded_entities)
+            for _ in range(is_a_max_hops):
+                if not frontier:
+                    break
+                next_frontier: set[str] = set()
+                for eid in list(frontier):
+                    try:
+                        outs = self.dvs.db.graph.get_neighbors(
+                            from_node_id_or_label=eid,
+                            relation=RelationIsA,
+                            limit=is_a_limit_per_hop,
+                            verbose=False,
+                        )
+                    except Exception:
+                        outs = []
+                    try:
+                        ins = self.dvs.db.graph.get_neighbors(
+                            to_node_id_or_label=eid,
+                            relation=RelationIsA,
+                            limit=is_a_limit_per_hop,
+                            verbose=False,
+                        )
+                    except Exception:
+                        ins = []
+                    for fn, _e, tn in list(outs) + list(ins):
+                        other = tn if fn.node_id == eid else fn
+                        if getattr(other, "kind", None) == "entity":
+                            oid: str = other.node_id
+                            if oid not in visited:
+                                visited.add(oid)
+                                expanded_entities.add(oid)
+                                next_frontier.add(oid)
+                frontier = next_frontier
+
+        # has_a 1-hop both directions
+        if has_a_enabled and expanded_entities:
+            seeds: list[str] = list(expanded_entities)[:500]
+            for eid in seeds:
+                try:
+                    outs = self.dvs.db.graph.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationHasA,
+                        limit=has_a_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    outs = []
+                try:
+                    ins = self.dvs.db.graph.get_neighbors(
+                        to_node_id_or_label=eid,
+                        relation=RelationHasA,
+                        limit=has_a_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    ins = []
+                for fn, _e, tn in list(outs) + list(ins):
+                    other = tn if fn.node_id == eid else fn
+                    if getattr(other, "kind", None) == "entity":
+                        expanded_entities.add(other.node_id)
+
+        # Hub suppression on expanded entities
+        if suppress_hubs and expanded_entities:
             try:
-                # Find documents connected to this entity node
-                # via "is_from" relationship
+                pr = self.dvs.db.graph.pagerank(
+                    relation=RelationRelatedTo, limit=5000, verbose=False
+                )
+                pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
+                if pr_map:
+                    scores: list[float] = sorted(pr_map.values(), reverse=True)
+                    pct: float = max(0.0, min(1.0, hub_pagerank_top_percent))
+                    idx: int = max(0, min(len(scores) - 1, int(len(scores) * pct) - 1))
+                    cutoff: float = scores[idx]
+                    expanded_entities = {
+                        eid
+                        for eid in expanded_entities
+                        if pr_map.get(eid, 0.0) < cutoff
+                    }
+            except Exception:
+                pass
+
+        # Collect documents from expanded entities via is_from
+        related_documents = set()
+        for node_id in list(expanded_entities)[:1000]:
+            try:
                 neighbors = self.dvs.db.graph.get_neighbors(
                     from_node_id_or_label=node_id,
                     relation=RelationIsFrom,
-                    limit=5,  # Limit documents per entity
+                    limit=5,
                     verbose=self.dvs.v(verbose),
                 )
-
                 for _, _, doc_node in neighbors:
                     if doc_node.kind == "document":
-                        # Use label as document_id
                         related_documents.add(doc_node.label)
-
             except Exception as e:
                 logger.error(f"⚠️ Error getting neighbors for node {node_id}: {e}")
                 continue
+
+        # Summary logging (standardized)
+        seeds_count_s2: int = len({nid for (nid, _sc) in important_nodes})
+        entities_count_s2: int = len(expanded_entities)
+        docs_count_s2: int = len(related_documents)
+        suppressed_count_s2: int = 0
+        if self.dvs.v(verbose):
+            logger.info(
+                (
+                    f"[S2] seeds={seeds_count_s2} "
+                    f"entities_after={entities_count_s2} "
+                    f"suppressed={suppressed_count_s2} "
+                    f"docs_collected={docs_count_s2}"
+                )
+            )
 
         if not related_documents:
             logger.warning(
@@ -981,13 +1107,13 @@ class Graph:
         logger.debug("⚖️ Step 4: Calculating combined scores...")
 
         # Get query embedding
-        query_vector = (
-            await SearchRequest.to_vectors(
-                [SearchRequest(query=query, top_k=1)],
-                model=self.dvs.model,
+        query_vector: list[float] = (
+            await asyncio.to_thread(
+                self.dvs.model.get_embeddings,
+                query,
                 model_settings=self.dvs.model_settings,
             )
-        )[0]
+        ).to_python()[0]
 
         scored_candidates: list[tuple[Point, Document, float, float]] = []
         for point in candidate_points:
@@ -1073,6 +1199,13 @@ class Graph:
         graph_importance_weight: float = 0.3,
         graph_distance_weight: float = 0.2,
         with_embedding: bool = False,
+        # Expansion and hub controls
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        suppress_hubs: bool = True,
+        hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 3: weighted blend of vector, graph importance, and distance.
@@ -1081,8 +1214,14 @@ class Graph:
         Use when: you can calibrate weights offline and want stable cross-domain
         performance.
         """
-        from dvs.types.edge import RelationIsFrom, RelationRelatedTo
+        from dvs.types.edge import (
+            RelationHasA,
+            RelationIsA,
+            RelationIsFrom,
+            RelationRelatedTo,
+        )
 
+        # cosine_similarity not needed in Strategy 3
         # Step 1: Initial vector search to get candidate points
         initial_results: list[tuple["Point", "Document", float]] = (
             await self.dvs.search(
@@ -1116,17 +1255,115 @@ class Graph:
             if document_id in pagerank_map and max_pagerank > 0:
                 return pagerank_map[document_id] / max_pagerank
 
-            # Otherwise, look at connected entity nodes via is_from and take max
+            # Otherwise, expand connected entities via is_from, then enrich via
+            # is_a/has_a, optionally suppress hubs by PR, and take the max PR.
             try:
                 neighbors = self.dvs.db.graph.get_neighbors(
                     to_node_id_or_label=document_id,
                     relation=RelationIsFrom,
-                    limit=15,
+                    limit=30,
                     verbose=False,
                 )
-                best: float = 0.0
+                entities: set[str] = set()
                 for _, _, to_node in neighbors:
-                    node_score = pagerank_map.get(to_node.node_id, 0.0)
+                    if getattr(to_node, "kind", None) == "entity":
+                        entities.add(to_node.node_id)
+
+                # is_a multi-hop both directions
+                if is_a_max_hops > 0 and entities:
+                    frontier: set[str] = set(entities)
+                    visited: set[str] = set(entities)
+                    for _ in range(is_a_max_hops):
+                        if not frontier:
+                            break
+                        next_frontier: set[str] = set()
+                        for eid in list(frontier):
+                            try:
+                                outs = self.dvs.db.graph.get_neighbors(
+                                    from_node_id_or_label=eid,
+                                    relation=RelationIsA,
+                                    limit=is_a_limit_per_hop,
+                                    verbose=False,
+                                )
+                            except Exception:
+                                outs = []
+                            try:
+                                ins = self.dvs.db.graph.get_neighbors(
+                                    to_node_id_or_label=eid,
+                                    relation=RelationIsA,
+                                    limit=is_a_limit_per_hop,
+                                    verbose=False,
+                                )
+                            except Exception:
+                                ins = []
+                            for fn, _e, tn in list(outs) + list(ins):
+                                other = tn if fn.node_id == eid else fn
+                                if getattr(other, "kind", None) == "entity":
+                                    oid: str = other.node_id
+                                    if oid not in visited:
+                                        visited.add(oid)
+                                        entities.add(oid)
+                                        next_frontier.add(oid)
+                        frontier = next_frontier
+
+                # has_a 1-hop both directions
+                if has_a_enabled and entities:
+                    seeds: list[str] = list(entities)[:300]
+                    for eid in seeds:
+                        try:
+                            outs = self.dvs.db.graph.get_neighbors(
+                                from_node_id_or_label=eid,
+                                relation=RelationHasA,
+                                limit=has_a_limit_per_entity,
+                                verbose=False,
+                            )
+                        except Exception:
+                            outs = []
+                        try:
+                            ins = self.dvs.db.graph.get_neighbors(
+                                to_node_id_or_label=eid,
+                                relation=RelationHasA,
+                                limit=has_a_limit_per_entity,
+                                verbose=False,
+                            )
+                        except Exception:
+                            ins = []
+                        for fn, _e, tn in list(outs) + list(ins):
+                            other = tn if fn.node_id == eid else fn
+                            if getattr(other, "kind", None) == "entity":
+                                entities.add(other.node_id)
+
+                # Optional hub suppression
+                if suppress_hubs and entities:
+                    try:
+                        pr = self.dvs.db.graph.pagerank(
+                            relation=RelationRelatedTo, limit=5000, verbose=False
+                        )
+                        pr_map2: dict[str, float] = {nid: sc for nid, sc in pr}
+                        if pr_map2:
+                            scores2: list[float] = sorted(
+                                pr_map2.values(), reverse=True
+                            )
+                            pct2: float = max(0.0, min(1.0, hub_pagerank_top_percent))
+                            idx2: int = max(
+                                0,
+                                min(
+                                    len(scores2) - 1,
+                                    int(len(scores2) * pct2) - 1,
+                                ),
+                            )
+                            cutoff2: float = scores2[idx2]
+                            entities = {
+                                eid
+                                for eid in entities
+                                if pr_map2.get(eid, 0.0) < cutoff2
+                            }
+                    except Exception:
+                        pass
+
+                best: float = 0.0
+                for eid in entities:
+                    node_score = pagerank_map.get(eid, 0.0)
                     if max_pagerank > 0:
                         best = max(best, node_score / max_pagerank)
                 return best
@@ -1204,6 +1441,13 @@ class Graph:
         query_expander: (
             typing.Callable[[str], "typing.Awaitable[list[str]]"] | None
         ) = None,
+        # Expansion and hub controls
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        suppress_hubs: bool = True,
+        hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 4: iterate expand→embed→search until improvement is small.
@@ -1212,19 +1456,24 @@ class Graph:
         Use when: batch/offline or higher-latency is fine; need high recall and
         adaptive retrieval.
         """
-        from dvs.types.edge import RelationIsFrom, RelationRelatedTo
+        from dvs.types.edge import (
+            RelationHasA,
+            RelationIsA,
+            RelationIsFrom,
+            RelationRelatedTo,
+        )
 
         if query_expander is None:
             raise ValueError("query_expander must be provided for LLM-based expansion.")
 
         # Step 0: Prepare baseline using original query
         base_vector: list[float] = (
-            await SearchRequest.to_vectors(
-                [SearchRequest(query=query, top_k=1, encoding=EncodingType.PLAINTEXT)],
-                model=self.dvs.model,
+            await asyncio.to_thread(
+                self.dvs.model.get_embeddings,
+                query,
                 model_settings=self.dvs.model_settings,
             )
-        )[0]
+        ).to_python()[0]
 
         baseline_results = await VSS.vector_search(
             vector=base_vector,
@@ -1274,14 +1523,13 @@ class Graph:
             )
 
             # 2) Embed expansions
-            expanded_vectors: list[list[float]] = await SearchRequest.to_vectors(
-                [
-                    SearchRequest(query=eq, top_k=1, encoding=EncodingType.PLAINTEXT)
-                    for eq in expanded_queries
-                ],
-                model=self.dvs.model,
-                model_settings=self.dvs.model_settings,
-            )
+            expanded_vectors = (
+                await asyncio.to_thread(
+                    self.dvs.model.get_embeddings,
+                    expanded_queries,
+                    model_settings=self.dvs.model_settings,
+                )
+            ).to_python()
 
             # 2b) Graph-guided expansion (is_from 1-hop) to boost recall
             seed_doc_ids: list[str] = [doc.document_id for _, doc, _ in best_results]
@@ -1311,15 +1559,97 @@ class Graph:
             pr = self.dvs.db.graph.pagerank(
                 relation=RelationRelatedTo, limit=5000, verbose=False
             )
-            pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
-            # Keep entities without PR score to avoid over-filtering in sparse graphs
-            filtered_entity_ids: list[str] = [
-                eid for eid in entity_ids if pr_map.get(eid, 1.0) >= 0.15
-            ]
+
+            # Expand entities via is_a multi-hop, then has_a 1-hop
+            expanded_entities_iter: set[str] = set(entity_ids)
+
+            if is_a_max_hops > 0 and expanded_entities_iter:
+                frontier4: set[str] = set(expanded_entities_iter)
+                visited4: set[str] = set(expanded_entities_iter)
+                for _ in range(is_a_max_hops):
+                    if not frontier4:
+                        break
+                    next_frontier4: set[str] = set()
+                    for eid in list(frontier4):
+                        try:
+                            outs4 = self.dvs.db.graph.get_neighbors(
+                                from_node_id_or_label=eid,
+                                relation=RelationIsA,
+                                limit=is_a_limit_per_hop,
+                                verbose=False,
+                            )
+                        except Exception:
+                            outs4 = []
+                        try:
+                            ins4 = self.dvs.db.graph.get_neighbors(
+                                to_node_id_or_label=eid,
+                                relation=RelationIsA,
+                                limit=is_a_limit_per_hop,
+                                verbose=False,
+                            )
+                        except Exception:
+                            ins4 = []
+                        for fn, _e, tn in list(outs4) + list(ins4):
+                            other = tn if fn.node_id == eid else fn
+                            if getattr(other, "kind", None) == "entity":
+                                oid4: str = other.node_id
+                                if oid4 not in visited4:
+                                    visited4.add(oid4)
+                                    expanded_entities_iter.add(oid4)
+                                    next_frontier4.add(oid4)
+                    frontier4 = next_frontier4
+
+            if has_a_enabled and expanded_entities_iter:
+                seeds4: list[str] = list(expanded_entities_iter)[:500]
+                for eid in seeds4:
+                    try:
+                        outs4 = self.dvs.db.graph.get_neighbors(
+                            from_node_id_or_label=eid,
+                            relation=RelationHasA,
+                            limit=has_a_limit_per_entity,
+                            verbose=False,
+                        )
+                    except Exception:
+                        outs4 = []
+                    try:
+                        ins4 = self.dvs.db.graph.get_neighbors(
+                            to_node_id_or_label=eid,
+                            relation=RelationHasA,
+                            limit=has_a_limit_per_entity,
+                            verbose=False,
+                        )
+                    except Exception:
+                        ins4 = []
+                    for fn, _e, tn in list(outs4) + list(ins4):
+                        other = tn if fn.node_id == eid else fn
+                        if getattr(other, "kind", None) == "entity":
+                            expanded_entities_iter.add(other.node_id)
+
+            # Optional hub suppression using PageRank (top percent cutoff)
+            if suppress_hubs and expanded_entities_iter:
+                try:
+                    pr = self.dvs.db.graph.pagerank(
+                        relation=RelationRelatedTo, limit=5000, verbose=False
+                    )
+                    pr_map4: dict[str, float] = {nid: sc for nid, sc in pr}
+                    if pr_map4:
+                        scores4: list[float] = sorted(pr_map4.values(), reverse=True)
+                        pct4: float = max(0.0, min(1.0, hub_pagerank_top_percent))
+                        idx4: int = max(
+                            0, min(len(scores4) - 1, int(len(scores4) * pct4) - 1)
+                        )
+                        cutoff4: float = scores4[idx4]
+                        expanded_entities_iter = {
+                            eid
+                            for eid in expanded_entities_iter
+                            if pr_map4.get(eid, 0.0) < cutoff4
+                        }
+                except Exception:
+                    pass
 
             # Expand to new documents (caps: 8 per entity, 150 total)
             graph_doc_ids: set[str] = set()
-            for eid in filtered_entity_ids:
+            for eid in list(expanded_entities_iter):
                 if len(graph_doc_ids) >= 150:
                     break
                 try:
@@ -1339,6 +1669,16 @@ class Graph:
                             break
                 except Exception:
                     continue
+
+            # Summary logging for S4
+            if self.dvs.v(verbose):
+                logger.info(
+                    (
+                        f"[S4] entities_seed={len(entity_ids)} "
+                        f"entities_after={len(expanded_entities_iter)} "
+                        f"docs_added={len(graph_doc_ids)}"
+                    )
+                )
 
             new_graph_docs = graph_doc_ids.difference(set(seed_doc_ids))
             if len(new_graph_docs) == 0:
@@ -1458,6 +1798,13 @@ class Graph:
         context_similarity_threshold: float = 0.7,
         max_expansion_steps: int = 2,
         with_embedding: bool = False,
+        # Expansion and hub controls
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        suppress_hubs: bool = True,
+        hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """Strategy 5: baseline seeds → is_from expand → context-centroid ranking.
@@ -1466,7 +1813,12 @@ class Graph:
         Use when: you prefer contextual precision with tight latency and minimal
         global graph prerequisites; hub suppression optional.
         """
-        from dvs.types.edge import RelationIsFrom
+        from dvs.types.edge import (
+            RelationHasA,
+            RelationIsA,
+            RelationIsFrom,
+            RelationRelatedTo,
+        )
         from dvs.utils.cosine_similarity import cosine_similarity
 
         # 0) Baseline vector search to get seed context
@@ -1551,12 +1903,12 @@ class Graph:
 
         # Query embedding (for vector similarity against candidates)
         query_vector: list[float] = (
-            await SearchRequest.to_vectors(
-                [SearchRequest(query=query, top_k=1)],
-                model=self.dvs.model,
+            await asyncio.to_thread(
+                self.dvs.model.get_embeddings,
+                query,
                 model_settings=self.dvs.model_settings,
             )
-        )[0]
+        ).to_python()[0]
 
         # 2) Single-step graph expansion via entities (is_from)
         #    Optionally respect max_expansion_steps>0; here we perform one step.
@@ -1586,28 +1938,93 @@ class Graph:
         if self.dvs.v(verbose):
             logger.debug(f"[S5] collected_entities={len(entity_ids)}")
 
-        # 2b) Light hub suppression via PageRank thresholding (optional, conservative)
-        try:
-            pr = self.dvs.db.graph.pagerank(
-                relation=RelationIsFrom, limit=5000, verbose=False
-            )
-            pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
-            before_pr: int = len(entity_ids)
-            entity_ids = {eid for eid in entity_ids if pr_map.get(eid, 0.1) >= 0.1}
-            after_pr: int = len(entity_ids)
-            if self.dvs.v(verbose):
-                logger.debug(
-                    (
-                        f"[S5] hub_suppress entities before={before_pr} "
-                        + f"after={after_pr}"
+        # 2b) Expand via is_a/has_a, then hub suppression via related_to PR
+        expanded_entities5: set[str] = set(entity_ids)
+
+        if is_a_max_hops > 0 and expanded_entities5:
+            frontier5: set[str] = set(expanded_entities5)
+            for _ in range(is_a_max_hops):
+                if not frontier5:
+                    break
+                for eid in list(frontier5):
+                    try:
+                        outs5 = self.dvs.db.graph.get_neighbors(
+                            from_node_id_or_label=eid,
+                            relation=RelationIsA,
+                            limit=is_a_limit_per_hop,
+                            verbose=False,
+                        )
+                    except Exception:
+                        outs5 = []
+                    try:
+                        ins5 = self.dvs.db.graph.get_neighbors(
+                            to_node_id_or_label=eid,
+                            relation=RelationIsA,
+                            limit=is_a_limit_per_hop,
+                            verbose=False,
+                        )
+                    except Exception:
+                        ins5 = []
+                    for fn, _e, tn in list(outs5) + list(ins5):
+                        other = tn if fn.node_id == eid else fn
+                        if getattr(other, "kind", None) == "entity":
+                            expanded_entities5.add(other.node_id)
+
+        if has_a_enabled and expanded_entities5:
+            seeds5: list[str] = list(expanded_entities5)[:500]
+            for eid in seeds5:
+                try:
+                    outs5 = self.dvs.db.graph.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationHasA,
+                        limit=has_a_limit_per_entity,
+                        verbose=False,
                     )
+                except Exception:
+                    outs5 = []
+                try:
+                    ins5 = self.dvs.db.graph.get_neighbors(
+                        to_node_id_or_label=eid,
+                        relation=RelationHasA,
+                        limit=has_a_limit_per_entity,
+                        verbose=False,
+                    )
+                except Exception:
+                    ins5 = []
+                for fn, _e, tn in list(outs5) + list(ins5):
+                    other = tn if fn.node_id == eid else fn
+                    if getattr(other, "kind", None) == "entity":
+                        expanded_entities5.add(other.node_id)
+
+        if suppress_hubs and expanded_entities5:
+            try:
+                pr5 = self.dvs.db.graph.pagerank(
+                    relation=RelationRelatedTo, limit=5000, verbose=False
                 )
-        except Exception:
-            pass
+                pr_map5: dict[str, float] = {nid: sc for nid, sc in pr5}
+            except Exception:
+                pr_map5 = {}
+            if pr_map5:
+                scores5: list[float] = sorted(pr_map5.values(), reverse=True)
+                pct5: float = max(0.0, min(1.0, hub_pagerank_top_percent))
+                idx5: int = max(0, min(len(scores5) - 1, int(len(scores5) * pct5) - 1))
+                cutoff5: float = scores5[idx5]
+                before_hub5: int = len(expanded_entities5)
+                expanded_entities5 = {
+                    eid for eid in expanded_entities5 if pr_map5.get(eid, 0.0) < cutoff5
+                }
+                suppressed5: int = before_hub5 - len(expanded_entities5)
+                if self.dvs.v(verbose):
+                    logger.info(
+                        (
+                            f"[S5] hub_suppressed={suppressed5} "
+                            f"entities_after={len(expanded_entities5)}"
+                        )
+                    )
 
         # 3) Collect candidate documents from these entities
         candidate_doc_ids: set[str] = set()
-        for eid in list(entity_ids)[:300]:
+        for eid in list(expanded_entities5)[:300]:
             try:
                 doc_neighbors = self.dvs.db.graph.get_neighbors(
                     from_node_id_or_label=eid,
@@ -1631,6 +2048,19 @@ class Graph:
                 (
                     f"[S5] candidate_docs={len(candidate_doc_ids)} "
                     + "(after removing seeds)"
+                )
+            )
+            suppressed_val5: int = (
+                (before_hub5 - len(expanded_entities5))
+                if "before_hub5" in locals()
+                else 0
+            )
+            logger.info(
+                (
+                    f"[S5] seeds={len(entity_ids)} "
+                    f"entities_after={len(expanded_entities5)} "
+                    f"suppressed={suppressed_val5} "
+                    f"docs_collected={len(candidate_doc_ids)}"
                 )
             )
 
