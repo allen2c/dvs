@@ -88,6 +88,28 @@ class Edges:
 
         return True
 
+    def drop(self, *, verbose: bool | None = None) -> bool:
+        with Timer() as timer:
+            self.dvs.new_connection().cursor().sql(
+                f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_IS_A_TABLE_NAME}"
+            )
+            self.dvs.new_connection().cursor().sql(
+                f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_HAS_A_TABLE_NAME}"
+            )
+            self.dvs.new_connection().cursor().sql(
+                f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_RELATED_TO_TABLE_NAME}"
+            )
+            self.dvs.new_connection().cursor().sql(
+                f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_IS_FROM_TABLE_NAME}"
+            )
+        debug_print(
+            f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_IS_A_TABLE_NAME}",
+            title=f"Dropping table: '{dvs.DVS_EDGES_IS_A_TABLE_NAME}' with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return True
+
     def retrieve(
         self, edge_id: typing.Text, *, verbose: bool | None = None
     ) -> EdgeType:

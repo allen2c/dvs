@@ -94,6 +94,7 @@ async def main():
         model_semaphore=asyncio.Semaphore(MAX_CONCURRENCY),
         verbose=VERBOSE,
     )
+
     dump_graph(graph, data_root.joinpath(f"{graph_stem_name}.json"), format="node_link")
     graph_path = dump_graph(
         graph, data_root.joinpath(f"{graph_stem_name}.gexf"), format="gexf"

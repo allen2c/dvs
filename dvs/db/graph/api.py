@@ -89,6 +89,23 @@ class Graph:
         logger.info(f"✅ Created property graph: '{dvs.DVS_GRAPH_TABLE_NAME}'")
         return True
 
+    def drop(self, *, verbose: bool | None = None) -> bool:
+        self.nodes.drop(verbose=self.dvs.v(verbose))
+        self.edges.drop(verbose=self.dvs.v(verbose))
+        with Timer() as timer:
+            conn = self.dvs.new_connection()
+            conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+            conn.cursor().sql(
+                f"DROP PROPERTY GRAPH IF EXISTS {dvs.DVS_GRAPH_TABLE_NAME}"
+            )
+        debug_print(
+            f"DROP PROPERTY GRAPH IF EXISTS {dvs.DVS_GRAPH_TABLE_NAME}",
+            title=f"Dropping property graph: '{dvs.DVS_GRAPH_TABLE_NAME}' with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return True
+
     async def rebuild_graph(
         self,
         *,
@@ -102,6 +119,9 @@ class Graph:
             graph_from_triplets_entities,
             triplets_entities_from_document,
         )
+
+        self.drop(verbose=self.dvs.v(verbose))
+        self.touch(verbose=self.dvs.v(verbose))
 
         documents = [
             doc for doc in self.dvs.db.documents.gen(verbose=self.dvs.v(verbose))

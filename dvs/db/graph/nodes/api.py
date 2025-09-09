@@ -58,6 +58,21 @@ class Nodes:
 
         return True
 
+    def drop(self, *, verbose: bool | None = None) -> bool:
+        with Timer() as timer:
+            self.dvs.new_connection().cursor().sql(
+                f"DROP TABLE IF EXISTS {dvs.DVS_NODES_TABLE_NAME}"
+            )
+
+        debug_print(
+            f"DROP TABLE IF EXISTS {dvs.DVS_NODES_TABLE_NAME}",
+            title=f"Dropping table: '{dvs.DVS_NODES_TABLE_NAME}' with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+
+        return True
+
     def retrieve(
         self, node_id: typing.Text, *, verbose: bool | None = None
     ) -> NodeType:
