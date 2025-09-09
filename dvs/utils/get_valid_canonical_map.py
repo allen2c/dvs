@@ -20,13 +20,15 @@ logger = logging.getLogger(__name__)
 async def get_valid_canonical_map(
     labels: list[str],
     *,
-    embedding_model: oai_emb_model.AsyncOpenAIEmbeddingsModel,
+    embedding_model: (
+        oai_emb_model.OpenAIEmbeddingsModel | oai_emb_model.AsyncOpenAIEmbeddingsModel
+    ),
     model_settings: oai_emb_model.ModelSettings,
     clustering_eps: float = 0.3,
     clustering_min_samples: int = 2,
     ner_agent: typing.Optional["NerAgent"] = None,
     chat_model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
-    max_concurrency: int = 1,
+    model_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
     cache: cachetic.Cachetic["SynonymsAndCanonicalNameResult"] | None = None,
     verbose: bool = False,
 ) -> typing.Dict[str, str]:
@@ -34,7 +36,7 @@ async def get_valid_canonical_map(
     from ner_agent import NerAgent, SynonymsAndCanonicalNameResult
 
     from dvs.utils.format_string import format_string
-    from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
+    from dvs.utils.gather_with_concurrency_limit import gather_with_semaphore
 
     ner_agent = ner_agent or NerAgent()
     if cache is None:
@@ -44,9 +46,14 @@ async def get_valid_canonical_map(
         )
 
     # 1. Embedding
-    response = await embedding_model.get_embeddings(
-        input=labels, model_settings=model_settings
-    )
+    if isinstance(embedding_model, oai_emb_model.OpenAIEmbeddingsModel):
+        response = await asyncio.to_thread(
+            embedding_model.get_embeddings, input=labels, model_settings=model_settings
+        )
+    else:
+        response = await embedding_model.get_embeddings(
+            input=labels, model_settings=model_settings
+        )
     embeddings = response.to_numpy()
 
     # 2. Clustering
@@ -76,8 +83,8 @@ async def get_valid_canonical_map(
         for label, items in clusters.items()
         if label != -1 and len(items) > 1
     }
-    validation_results = await gather_with_concurrency_limit(
-        validation_tasks.values(), limit=max_concurrency
+    validation_results = await gather_with_semaphore(
+        validation_tasks.values(), semaphore=model_semaphore
     )
     validated_clusters = dict(zip(validation_tasks.keys(), validation_results))
 

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import pathlib
+import time
 import typing
 
 import agents
@@ -24,7 +25,7 @@ async def extract_relations(
     *,
     ner_agent: typing.Optional["NerAgent"] = None,
     model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
-    max_concurrency: int = 1,
+    model_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
     cache: cachetic.Cachetic["RelationExtractionResult"] | None = None,
     verbose: bool = False,
 ) -> list["Triplet"]:
@@ -32,7 +33,7 @@ async def extract_relations(
     from ner_agent import RelationExtractionResult
 
     from dvs.types.triplet import Triplet
-    from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
+    from dvs.utils.gather_with_concurrency_limit import gather_with_semaphore
 
     ner_agent = ner_agent or NerAgent()
     if cache is None:
@@ -43,17 +44,18 @@ async def extract_relations(
 
     total_count = len(facts)
     complete_count = 0
-
     counter_lock = asyncio.Lock()
+    pc = time.perf_counter()
 
     async def run_extract_relations(fact: "Fact") -> list["Triplet"]:
         nonlocal complete_count
+        nonlocal pc
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
 
-        percent_step: int = max(1, total_count // 10)
-        if (current_idx % percent_step == 0) or (current_idx == total_count):
+        if current_pc := time.perf_counter() - pc > 10:
             logger.debug(f"Extracting relations for fact {current_idx}/{total_count}")
+            pc = current_pc
 
         cache_key = (
             "extract_relations:"
@@ -85,8 +87,8 @@ async def extract_relations(
 
     relation_tasks = [run_extract_relations(fact) for fact in facts]
 
-    triplets_results: list[list["Triplet"]] = await gather_with_concurrency_limit(
-        relation_tasks, limit=max_concurrency
+    triplets_results: list[list["Triplet"]] = await gather_with_semaphore(
+        relation_tasks, semaphore=model_semaphore
     )
 
     all_triplets: list[Triplet] = []
@@ -102,14 +104,14 @@ async def extract_entities(
     *,
     ner_agent: typing.Optional["NerAgent"] = None,
     model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
-    max_concurrency: int = 1,
+    model_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
     cache: cachetic.Cachetic["NerResult"] | None = None,
     verbose: bool = False,
 ) -> list["Entity"]:
     from ner_agent import NerResult
 
     from dvs.types.entity import Entity
-    from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
+    from dvs.utils.gather_with_concurrency_limit import gather_with_semaphore
 
     ner_agent = ner_agent or NerAgent()
     if cache is None:
@@ -121,15 +123,17 @@ async def extract_entities(
     total_count = len(facts)
     complete_count = 0
     counter_lock = asyncio.Lock()
+    pc = time.perf_counter()
 
     async def run_extract_entities(fact: "Fact") -> list["Entity"]:
         nonlocal complete_count
+        nonlocal pc
         async with counter_lock:
             current_idx = complete_count = complete_count + 1
 
-        percent_step: int = max(1, total_count // 10)
-        if (current_idx % percent_step == 0) or (current_idx == total_count):
+        if current_pc := time.perf_counter() - pc > 10:
             logger.debug(f"Extracting entities for fact {current_idx}/{total_count}")
+            pc = current_pc
 
         cache_key = (
             "extract_entities:"
@@ -156,8 +160,8 @@ async def extract_entities(
 
     entity_tasks = [run_extract_entities(fact) for fact in facts]
 
-    entities_results: list[list[Entity]] = await gather_with_concurrency_limit(
-        entity_tasks, limit=max_concurrency
+    entities_results: list[list[Entity]] = await gather_with_semaphore(
+        entity_tasks, semaphore=model_semaphore
     )
 
     all_entities: list[Entity] = [

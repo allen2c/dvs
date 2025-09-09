@@ -24,7 +24,7 @@ async def get_facts(
     *,
     aps_agent: typing.Optional["APSAgent"] = None,
     model: agents.OpenAIChatCompletionsModel | agents.OpenAIResponsesModel,
-    max_concurrency: int = 1,
+    model_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
     cache: cachetic.Cachetic["APSResult"] | None = None,
     verbose: bool = False,
 ) -> typing.List["Fact"]:
@@ -32,7 +32,7 @@ async def get_facts(
     from aps_agent import APSAgent, APSResult
 
     from dvs.types.fact import Fact
-    from dvs.utils.gather_with_concurrency_limit import gather_with_concurrency_limit
+    from dvs.utils.gather_with_concurrency_limit import gather_with_semaphore
 
     aps_agent = aps_agent or APSAgent()
     if cache is None:
@@ -67,8 +67,8 @@ async def get_facts(
 
     aps_result_tasks = [run_aps_agent(doc) for doc in documents]
 
-    facts_results = await gather_with_concurrency_limit(
-        aps_result_tasks, limit=max_concurrency
+    facts_results = await gather_with_semaphore(
+        aps_result_tasks, semaphore=model_semaphore
     )
     all_facts.extend(fact for fact_list in facts_results for fact in fact_list)
 

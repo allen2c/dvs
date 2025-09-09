@@ -1,7 +1,5 @@
 import asyncio
-import json
 import pathlib
-import typing
 
 import agents
 import diskcache
@@ -21,7 +19,6 @@ from dvs.types.document import Document
 from dvs.types.edge import Edge
 from dvs.types.graphrag_result import GraphRAGResult
 from dvs.types.node import Node
-from dvs.utils.build_graph_from_documents import build_graph_from_documents
 from dvs.utils.dump_graph import dump_graph
 from dvs.utils.load_documents_from_directory import load_documents_from_directory
 from dvs.utils.loads_graph import load_graph
@@ -89,25 +86,13 @@ async def main():
     created_result = dvs_client.add(raw_documents)
     console.log(f"Created DVS result: {created_result}")
 
-    # --- Step 2.5: Optional Draw embeddings on 2D plane ---
-    console.rule("[bold blue]Step 2.5: Draw embeddings on 2D plane[/bold blue]")
-    points = [p for p in dvs_client.db.points.gen(limit=100, with_embedding=True)]
-    label_embeddings: typing.List[typing.Tuple[str, typing.List[float]]] = []
-    for p in points:
-        doc = dvs_client.db.documents.retrieve(p.document_id)
-        label_embeddings.append((f"{doc.name}:{doc.chunk_index}", p.to_python()))
-    label_embeddings_path.write_text(json.dumps(label_embeddings))
-
     # --- Step 3: Build Graph ---
     console.rule("[bold blue]Step 3: Build Graph[/bold blue]")
-    graph = await build_graph_from_documents(
-        [doc for doc in dvs_client.db.documents.gen(verbose=VERBOSE)],
+    graph = await dvs_client.db.graph.rebuild_graph(
         chat_model=chat_model,
-        embeddings_model=emb_model,
-        embeddings_model_settings=emb_settings,
-        aps_agent=aps_agent,
-        ner_agent=ner_agent,
-        max_concurrency=MAX_CONCURRENCY,
+        document_semaphore=asyncio.Semaphore(MAX_CONCURRENCY),
+        model_semaphore=asyncio.Semaphore(MAX_CONCURRENCY),
+        verbose=VERBOSE,
     )
     dump_graph(graph, data_root.joinpath(f"{graph_stem_name}.json"), format="node_link")
     graph_path = dump_graph(
@@ -129,12 +114,7 @@ async def main():
     ]
     console.log(f"Nodes: {len(nodes)}, Edges: {len(edges)}")
 
-    # --- Step 4: Add Nodes and Edges to DVS ---
-    console.rule("[bold blue]Step 4: Add Nodes and Edges to DVS[/bold blue]")
-    dvs_client.db.graph.nodes.bulk_create(nodes)
-    dvs_client.db.graph.edges.bulk_create(edges)
-
-    # --- Step 5: Unified Graph-RAG Comparison (Strategies 1-5) ---
+    # --- Step 4: Unified Graph-RAG Comparison (Strategies 1-5) ---
     console.rule(
         "[bold cyan]Unified Graph-RAG Comparison (Strategies 1-5) - Quick Mode[/bold cyan]"  # noqa: E501
     )

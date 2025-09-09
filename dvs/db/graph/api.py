@@ -5,6 +5,8 @@ import textwrap
 import typing
 from concurrent.futures import ThreadPoolExecutor
 
+from agents import OpenAIChatCompletionsModel, OpenAIResponsesModel
+
 import dvs
 import dvs.utils.vss as VSS
 from dvs.types.document import Document
@@ -16,14 +18,18 @@ from dvs.types.edge import (
     RelationRelatedTo,
     RelationType,
 )
+from dvs.types.entity import Entity
 from dvs.types.graphrag_result import GraphRAGResult
 from dvs.types.node import Node as NodeType
 from dvs.types.point import Point
+from dvs.types.triplet import Triplet
 from dvs.utils.debug_print import debug_print
 from dvs.utils.sql_stmts import SQL_STMT_LOAD_DUCKPGQ
 from dvs.utils.timer import Timer
 
 if typing.TYPE_CHECKING:
+    import networkx as nx
+
     from dvs.db.graph.edges.api import Edges
     from dvs.db.graph.nodes.api import Nodes
 
@@ -82,6 +88,65 @@ class Graph:
         )
         logger.info(f"✅ Created property graph: '{dvs.DVS_GRAPH_TABLE_NAME}'")
         return True
+
+    async def rebuild_graph(
+        self,
+        *,
+        chat_model: OpenAIResponsesModel | OpenAIChatCompletionsModel,
+        document_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
+        model_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
+        verbose: bool | None = None,
+    ) -> "nx.DiGraph":
+        from dvs.utils.build_graph_from_documents import (
+            canonical_map_from_triplets_entities,
+            graph_from_triplets_entities,
+            triplets_entities_from_document,
+        )
+
+        documents = [
+            doc for doc in self.dvs.db.documents.gen(verbose=self.dvs.v(verbose))
+        ]
+        documents_task = [
+            triplets_entities_from_document(
+                document=document,
+                chat_model=chat_model,
+                extract_extra_entities=True,
+                document_semaphore=document_semaphore,
+                model_semaphore=model_semaphore,
+                verbose=self.dvs.v(verbose),
+            )
+            for document in documents
+        ]
+        triplets_entities_results = await asyncio.gather(*documents_task)
+
+        triplets: list[Triplet] = []
+        entities: list[Entity] = []
+        for result in triplets_entities_results:
+            triplets.extend(result[0])
+            entities.extend(result[1])
+
+        canonical_map = await canonical_map_from_triplets_entities(
+            triplets=triplets,
+            entities=entities,
+            embeddings_model=self.dvs.model,
+            embeddings_model_settings=self.dvs.model_settings,
+            chat_model=chat_model,
+            model_semaphore=model_semaphore,
+            verbose=self.dvs.v(verbose),
+        )
+
+        # Build the Final Knowledge Graph
+        G, nodes, edges = await graph_from_triplets_entities(
+            triplets=triplets,
+            entities=entities,
+            canonical_map=canonical_map,
+        )
+        self.nodes.bulk_create(nodes)
+        self.edges.bulk_create(edges)
+
+        logger.info("✨ Knowledge Graph Construction Complete! ✨")
+        logger.info(f"Total Nodes: {len(nodes)}, Edges: {len(edges)}")
+        return G
 
     @functools.cached_property
     def nodes(self) -> "Nodes":
