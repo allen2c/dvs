@@ -19,24 +19,34 @@ class Manifest:
         """Initialize manifest API with DVS instance."""
         self.dvs = dvs
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Create the manifest table if it does not exist.
         Returns True when table creation is completed successfully.
         """
 
-        self._touch(verbose=self.dvs.v(verbose))
+        self._touch(conn=conn, verbose=self.dvs.v(verbose))
 
         return True
 
-    def receive(self, *, verbose: bool | None = None) -> ManifestType | None:
+    def receive(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> ManifestType | None:
         """
         Retrieve the manifest from the DuckDB database.
         Returns None if no manifest record exists.
         """
 
         with Timer() as timer:
-            out = self._receive(verbose=self.dvs.v(verbose))
+            out = self._receive(conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -45,7 +55,11 @@ class Manifest:
         return out
 
     def create(
-        self, manifest: ManifestType, *, verbose: bool | None = None
+        self,
+        manifest: ManifestType,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> ManifestType:
         """
         Insert a new manifest record into the DuckDB database.
@@ -53,7 +67,7 @@ class Manifest:
         """
 
         with Timer() as timer:
-            out = self._create(manifest, verbose=self.dvs.v(verbose))
+            out = self._create(manifest, conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -61,14 +75,19 @@ class Manifest:
 
         return out
 
-    def drop(self, *, verbose: bool | None = None) -> bool:
+    def drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Drop the manifest table and all its data.
         This operation is irreversible.
         """
 
         with Timer() as timer:
-            self._drop(verbose=self.dvs.v(verbose))
+            self._drop(conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -78,7 +97,12 @@ class Manifest:
 
         return True
 
-    def _touch(self, *, verbose: bool | None = None) -> bool:
+    def _touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Internal method to create the manifest table if it does not exist.
         Handles table creation SQL generation and execution.
@@ -90,7 +114,8 @@ class Manifest:
             ).strip()
 
             try:
-                self.dvs.new_connection().cursor().sql(create_table_sql)
+                conn = conn or self.dvs.new_connection()
+                conn.cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(
@@ -108,7 +133,12 @@ class Manifest:
 
         return True
 
-    def _receive(self, *, verbose: bool | None = None) -> ManifestType | None:
+    def _receive(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> ManifestType | None:
         """
         Internal method to retrieve the manifest from the DuckDB database.
         Executes SELECT query and validates the result as ManifestType.
@@ -119,12 +149,8 @@ class Manifest:
         query = f"SELECT {columns_expr} FROM {dvs.DVS_MANIFEST_TABLE_NAME}"
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query).fetchone()
 
         debug_print(
             f"{query}",
@@ -142,7 +168,11 @@ class Manifest:
         return manifest
 
     def _create(
-        self, manifest: ManifestType, *, verbose: bool | None = None
+        self,
+        manifest: ManifestType,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> ManifestType:
         """
         Internal method to insert a manifest record into the DuckDB database.
@@ -161,7 +191,8 @@ class Manifest:
         )
 
         with Timer() as timer:
-            self.dvs.new_connection().cursor().executemany(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -172,14 +203,20 @@ class Manifest:
 
         return manifest
 
-    def _drop(self, *, verbose: bool | None = None) -> None:
+    def _drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> None:
         """
         Internal method to drop the manifest table.
         """
         query = f"DROP TABLE IF EXISTS {dvs.DVS_MANIFEST_TABLE_NAME}"
 
         with Timer() as timer:
-            self.dvs.new_connection().cursor().execute(query)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().execute(query)
 
         debug_print(
             f"{query}",

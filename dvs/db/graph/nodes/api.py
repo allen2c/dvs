@@ -32,8 +32,15 @@ class Nodes:
     def columns_expr(self) -> typing.Text:
         return ", ".join(self.columns)
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
+
         with Timer() as timer:
+            conn = conn or self.dvs.new_connection()
             create_table_sql = openapi_to_create_table_sql(
                 NodeType.model_json_schema(),
                 table_name=dvs.DVS_NODES_TABLE_NAME,
@@ -42,7 +49,7 @@ class Nodes:
                 indexes=["node_id", "label"],
             )
             try:
-                self.dvs.new_connection().cursor().sql(create_table_sql)
+                conn.cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(f"Table '{dvs.DVS_NODES_TABLE_NAME}' already exists")
@@ -58,11 +65,15 @@ class Nodes:
 
         return True
 
-    def drop(self, *, verbose: bool | None = None) -> bool:
+    def drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         with Timer() as timer:
-            self.dvs.new_connection().cursor().sql(
-                f"DROP TABLE IF EXISTS {dvs.DVS_NODES_TABLE_NAME}"
-            )
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().sql(f"DROP TABLE IF EXISTS {dvs.DVS_NODES_TABLE_NAME}")
 
         debug_print(
             f"DROP TABLE IF EXISTS {dvs.DVS_NODES_TABLE_NAME}",
@@ -74,7 +85,11 @@ class Nodes:
         return True
 
     def retrieve(
-        self, node_id: typing.Text, *, verbose: bool | None = None
+        self,
+        node_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> NodeType:
         query = textwrap.dedent(
             f"""
@@ -87,12 +102,8 @@ class Nodes:
         parameters = [node_id]
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -114,7 +125,11 @@ class Nodes:
         return node
 
     def retrieve_by_label(
-        self, label: typing.Text, *, verbose: bool | None = None
+        self,
+        label: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> NodeType:
         query = textwrap.dedent(
             f"""
@@ -125,12 +140,8 @@ class Nodes:
         parameters = [label]
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -155,16 +166,22 @@ class Nodes:
         self,
         node: typing.Union[NodeType, typing.Dict],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> NodeType:
         nodes = self.bulk_create(
             [node if isinstance(node, NodeType) else NodeType.model_validate(node)],
+            conn=conn,
             verbose=self.dvs.v(verbose),
         )
         return nodes[0]
 
     def bulk_create(
-        self, nodes: typing.Sequence[NodeType], *, verbose: bool | None = None
+        self,
+        nodes: typing.Sequence[NodeType],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> typing.List[NodeType]:
         if not nodes:
             return []
@@ -182,7 +199,8 @@ class Nodes:
         # Create nodes
         with Timer() as timer:
             logger.debug(f"🔨 Creating {len(nodes)} nodes ...")
-            self.dvs.new_connection().cursor().executemany(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
@@ -201,6 +219,7 @@ class Nodes:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> Pagination[NodeType]:
         query = f"SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME}\n"
@@ -237,12 +256,8 @@ class Nodes:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
-            results = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchall()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            results = conn.cursor().execute(query, parameters).fetchall()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -278,6 +293,7 @@ class Nodes:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.Generator[NodeType, None, None]:
         has_more = True
@@ -289,6 +305,7 @@ class Nodes:
                 before=before,
                 limit=limit,
                 order=order,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
             has_more = nodes.has_more
@@ -300,6 +317,7 @@ class Nodes:
         self,
         *,
         label_contains: typing.Optional[typing.Text] = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> int:
         query = f"SELECT COUNT(*) FROM {dvs.DVS_NODES_TABLE_NAME}\n"
@@ -314,12 +332,8 @@ class Nodes:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",

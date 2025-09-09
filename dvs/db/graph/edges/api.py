@@ -38,7 +38,12 @@ class Edges:
     def columns_expr(self) -> typing.Text:
         return ", ".join(self.columns)
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         with Timer() as timer:
             sqls: typing.List[typing.Text] = []
             table_names_expr = ", ".join(
@@ -71,7 +76,8 @@ class Edges:
             sql_stmt = ";\n".join(sqls)
 
             try:
-                self.dvs.new_connection().cursor().sql(sql_stmt)
+                conn = conn or self.dvs.new_connection()
+                conn.cursor().sql(sql_stmt)
 
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
@@ -88,18 +94,20 @@ class Edges:
 
         return True
 
-    def drop(self, *, verbose: bool | None = None) -> bool:
+    def drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         with Timer() as timer:
-            self.dvs.new_connection().cursor().sql(
-                f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_IS_A_TABLE_NAME}"
-            )
-            self.dvs.new_connection().cursor().sql(
-                f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_HAS_A_TABLE_NAME}"
-            )
-            self.dvs.new_connection().cursor().sql(
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().sql(f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_IS_A_TABLE_NAME}")
+            conn.cursor().sql(f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_HAS_A_TABLE_NAME}")
+            conn.cursor().sql(
                 f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_RELATED_TO_TABLE_NAME}"
             )
-            self.dvs.new_connection().cursor().sql(
+            conn.cursor().sql(
                 f"DROP TABLE IF EXISTS {dvs.DVS_EDGES_IS_FROM_TABLE_NAME}"
             )
         debug_print(
@@ -111,10 +119,15 @@ class Edges:
         return True
 
     def retrieve(
-        self, edge_id: typing.Text, *, verbose: bool | None = None
+        self,
+        edge_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> EdgeType:
 
         with Timer() as timer:
+            conn = conn or self.dvs.new_connection(read_only=True)
             for table_name in [
                 dvs.DVS_EDGES_IS_A_TABLE_NAME,
                 dvs.DVS_EDGES_HAS_A_TABLE_NAME,
@@ -122,12 +135,7 @@ class Edges:
                 dvs.DVS_EDGES_IS_FROM_TABLE_NAME,
             ]:
                 query = f"SELECT {self.columns_expr} FROM {table_name}"
-                result = (
-                    self.dvs.new_connection(read_only=True)
-                    .cursor()
-                    .execute(query)
-                    .fetchone()
-                )
+                result = conn.cursor().execute(query).fetchone()
                 if result is not None:
                     break
             else:
@@ -160,16 +168,22 @@ class Edges:
         self,
         edge: typing.Union[EdgeType, typing.Dict],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> EdgeType:
         edges = self.bulk_create(
             [edge if isinstance(edge, EdgeType) else EdgeType.model_validate(edge)],
+            conn=conn,
             verbose=self.dvs.v(verbose),
         )
         return edges[0]
 
     def bulk_create(
-        self, edges: typing.Sequence[EdgeType], *, verbose: bool | None = None
+        self,
+        edges: typing.Sequence[EdgeType],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> typing.List[EdgeType]:
         if not edges:
             return []
@@ -179,6 +193,7 @@ class Edges:
         # Create nodes
         queries: typing.List[typing.Text] = []
         with Timer() as timer:
+            conn = conn or self.dvs.new_connection()
             logger.debug(f"🔨 Creating {len(edges)} edges ...")
             for edge_type, edge_table_name in [
                 (RelationIsA, dvs.DVS_EDGES_IS_A_TABLE_NAME),
@@ -195,7 +210,7 @@ class Edges:
                     f"INSERT INTO {edge_table_name} ({self.columns_expr}) "
                     + f"VALUES ({placeholders})"
                 )
-                self.dvs.new_connection().cursor().executemany(query, parameters)
+                conn.cursor().executemany(query, parameters)
 
                 queries.append(
                     f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}"  # noqa: E501)
@@ -223,6 +238,7 @@ class Edges:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> Pagination[EdgeType]:
         table_name = {
@@ -277,12 +293,8 @@ class Edges:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
-            results = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchall()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            results = conn.cursor().execute(query, parameters).fetchall()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -322,6 +334,7 @@ class Edges:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.Generator[EdgeType, None, None]:
         has_more = True
@@ -337,6 +350,7 @@ class Edges:
                 before=before,
                 limit=limit,
                 order=order,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
             has_more = edges.has_more
@@ -352,6 +366,7 @@ class Edges:
         to_node_id: typing.Optional[typing.Text] = None,
         from_node_label_contains: typing.Optional[typing.Text] = None,
         to_node_label_contains: typing.Optional[typing.Text] = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> int:
         table_name = {
@@ -381,12 +396,8 @@ class Edges:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",

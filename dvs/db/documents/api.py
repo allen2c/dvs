@@ -25,13 +25,18 @@ class Documents:
         """Initialize documents API with DVS instance."""
         self.dvs = dvs
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Ensure the existence of the documents table in the DuckDB database.
         Creates the table if it doesn't exist, installs necessary extensions.
         """
         with Timer() as timer:
-            self._touch(verbose=self.dvs.v(verbose))
+            self._touch(conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -42,14 +47,18 @@ class Documents:
         return True
 
     def retrieve(
-        self, document_id: typing.Text, *, verbose: bool | None = None
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
         Raises NotFoundError if the document doesn't exist.
         """
         with Timer() as timer:
-            out = self._retrieve(document_id, verbose=self.dvs.v(verbose))
+            out = self._retrieve(document_id, conn=conn, verbose=self.dvs.v(verbose))
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Retrieved document: '{document_id}' in {dur:.3f} ms")
@@ -59,6 +68,7 @@ class Documents:
         self,
         document: typing.Union[DocumentType, typing.Dict],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> DocumentType:
         """
@@ -66,7 +76,7 @@ class Documents:
         Accepts either a Document instance or a dictionary.
         """
         with Timer() as timer:
-            docs = self.bulk_create([document], verbose=self.dvs.v(verbose))
+            docs = self.bulk_create([document], conn=conn, verbose=self.dvs.v(verbose))
         doc = docs[0]
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -81,6 +91,7 @@ class Documents:
             typing.Sequence[typing.Union[DocumentType, typing.Dict]],
         ],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.List[DocumentType]:
         """
@@ -96,7 +107,7 @@ class Documents:
                 )
                 for doc in documents
             ]
-            self._bulk_create(documents, verbose=self.dvs.v(verbose))
+            self._bulk_create(documents, conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur, unit = (
@@ -108,13 +119,19 @@ class Documents:
 
         return documents
 
-    def remove(self, document_id: typing.Text, *, verbose: bool | None = None) -> None:
+    def remove(
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> None:
         """
         Remove a document from the DuckDB database by its ID.
         Uses parameterized queries to prevent SQL injection.
         """
         with Timer() as timer:
-            self._remove(document_id, verbose=self.dvs.v(verbose))
+            self._remove(document_id, conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -130,6 +147,7 @@ class Documents:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> Pagination[DocumentType]:
         """
@@ -144,6 +162,7 @@ class Documents:
                 before=before,
                 limit=limit,
                 order=order,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
 
@@ -161,6 +180,7 @@ class Documents:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.Generator[DocumentType, None, None]:
         """
@@ -177,6 +197,7 @@ class Documents:
                 before=before,
                 limit=limit,
                 order=order,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
             has_more = documents.has_more
@@ -189,6 +210,7 @@ class Documents:
         *,
         document_id: typing.Optional[typing.Text] = None,
         content_md5: typing.Optional[typing.Text] = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> int:
         """
@@ -199,6 +221,7 @@ class Documents:
             out = self._count(
                 document_id=document_id,
                 content_md5=content_md5,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
         if self.dvs.v(verbose):
@@ -207,7 +230,11 @@ class Documents:
         return out
 
     def content_exists(
-        self, content_md5: typing.Text, *, verbose: bool | None = None
+        self,
+        content_md5: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> bool:
         """
         Check if a document with the given content_md5 exists in the database.
@@ -218,6 +245,7 @@ class Documents:
                 source_id=None,
                 limit=1,
                 order="asc",
+                conn=conn,
                 verbose=self.dvs.v(verbose),
                 after=None,
                 before=None,
@@ -230,6 +258,7 @@ class Documents:
     def drop(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         force: bool = False,
         verbose: bool | None = None,
         touch_after_drop: bool = True,
@@ -243,10 +272,10 @@ class Documents:
             raise ValueError("Use force=True to drop table.")
 
         with Timer() as timer:
-            self._drop(verbose=self.dvs.v(verbose))
+            self._drop(conn=conn, verbose=self.dvs.v(verbose))
 
         if touch_after_drop:
-            self._touch(verbose=self.dvs.v(verbose))
+            self._touch(conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -256,7 +285,12 @@ class Documents:
 
         return None
 
-    def _touch(self, *, verbose: bool | None = None) -> bool:
+    def _touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Ensure the existence of the documents table in the DuckDB database.
         """
@@ -275,7 +309,8 @@ class Documents:
             )
 
             try:
-                self.dvs.new_connection().cursor().sql(create_table_sql)
+                conn = conn or self.dvs.new_connection()
+                conn.cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(
@@ -294,7 +329,11 @@ class Documents:
         return True
 
     def _retrieve(
-        self, document_id: typing.Text, *, verbose: bool | None = None
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
@@ -311,12 +350,8 @@ class Documents:
         parameters = [document_id]
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
             if result is None:
                 raise NotFoundError(
@@ -342,6 +377,7 @@ class Documents:
         self,
         documents: typing.Sequence[DocumentType],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.List[DocumentType]:
         """
@@ -365,7 +401,8 @@ class Documents:
 
         with Timer() as timer:
             # Create documents
-            self.dvs.new_connection().cursor().executemany(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
@@ -375,7 +412,13 @@ class Documents:
         )
         return list(documents)
 
-    def _remove(self, document_id: typing.Text, *, verbose: bool | None) -> None:
+    def _remove(
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None,
+    ) -> None:
         """
         Remove a document from the DuckDB database by its ID.
         """
@@ -385,7 +428,8 @@ class Documents:
 
         with Timer() as timer:
             # Delete document
-            self.dvs.new_connection().cursor().execute(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -405,6 +449,7 @@ class Documents:
         before: typing.Optional[typing.Text],
         limit: int,
         order: typing.Literal["asc", "desc"],
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None,
     ) -> Pagination[DocumentType]:
         """
@@ -442,12 +487,8 @@ class Documents:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
-            results = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchall()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            results = conn.cursor().execute(query, parameters).fetchall()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -483,6 +524,7 @@ class Documents:
         *,
         document_id: typing.Optional[typing.Text],
         content_md5: typing.Optional[typing.Text],
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None,
     ) -> int:
         """
@@ -503,12 +545,8 @@ class Documents:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -521,7 +559,12 @@ class Documents:
 
         return count
 
-    def _drop(self, *, verbose: bool | None = None) -> None:
+    def _drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> None:
         """
         Drop the documents table from the DuckDB database.
         """  # noqa: E501
@@ -530,7 +573,8 @@ class Documents:
 
         with Timer() as timer:
             # Drop table
-            self.dvs.new_connection().cursor().sql(query)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().sql(query)
 
         debug_print(
             f"{query}",

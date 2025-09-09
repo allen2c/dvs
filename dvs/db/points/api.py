@@ -34,13 +34,18 @@ class Points:
         """Initialize points API with DVS instance."""
         self.dvs = dvs
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Initialize the points table in DuckDB with vector similarity search support.
         Creates the table with proper schema, indexes, and HNSW indexing for embeddings.
         """
         with Timer() as timer:
-            self._touch(verbose=self.dvs.v(verbose))
+            self._touch(conn=conn, verbose=self.dvs.v(verbose))
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(
@@ -52,6 +57,7 @@ class Points:
         self,
         point_id: typing.Text,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
         with_embedding: bool = False,
     ) -> "PointType":
@@ -61,7 +67,10 @@ class Points:
         """
         with Timer() as timer:
             out = self._retrieve(
-                point_id, verbose=self.dvs.v(verbose), with_embedding=with_embedding
+                point_id,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
+                with_embedding=with_embedding,
             )
 
         if self.dvs.v(verbose):
@@ -73,6 +82,7 @@ class Points:
         self,
         point: typing.Union["PointType", typing.Dict],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> "PointType":
         """
@@ -85,7 +95,7 @@ class Points:
 
         with Timer() as timer:
             points = self._bulk_create(
-                points=[point], verbose=self.dvs.v(verbose), batch_size=1
+                points=[point], conn=conn, verbose=self.dvs.v(verbose), batch_size=1
             )
         point = points[0]
 
@@ -102,6 +112,7 @@ class Points:
             typing.Sequence[typing.Union["PointType", typing.Dict]],
         ],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         batch_size: int = 100,
         verbose: bool | None = None,
     ) -> typing.List["PointType"]:
@@ -116,7 +127,10 @@ class Points:
 
         with Timer() as timer:
             points = self._bulk_create(
-                points=points, verbose=self.dvs.v(verbose), batch_size=batch_size
+                points=points,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
+                batch_size=batch_size,
             )
 
         if self.dvs.v(verbose):
@@ -129,13 +143,19 @@ class Points:
 
         return points
 
-    def remove(self, point_id: typing.Text, *, verbose: bool | None = None) -> None:
+    def remove(
+        self,
+        point_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> None:
         """
         Delete a single point from the database by its ID.
         No error is raised if the point doesn't exist.
         """
         with Timer() as timer:
-            self._remove(point_id, verbose=self.dvs.v(verbose))
+            self._remove(point_id, conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -152,6 +172,7 @@ class Points:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         with_embedding: bool = False,
         verbose: bool | None = None,
     ) -> Pagination["PointType"]:
@@ -167,6 +188,7 @@ class Points:
                 before=before,
                 limit=limit,
                 order=order,
+                conn=conn,
                 with_embedding=with_embedding,
                 verbose=self.dvs.v(verbose),
             )
@@ -189,6 +211,7 @@ class Points:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         with_embedding: bool = False,
         verbose: bool | None = None,
     ) -> typing.Generator["PointType", None, None]:
@@ -198,20 +221,21 @@ class Points:
         """
 
         has_more = True
-        after = None
+        current_after = after
         while has_more:
             points = self._list(
                 document_id=document_id,
                 content_md5=content_md5,
-                after=after,
+                after=current_after,
                 before=before,
                 limit=limit,
                 order=order,
+                conn=conn,
                 with_embedding=with_embedding,
                 verbose=self.dvs.v(verbose),
             )
             has_more = points.has_more
-            after = points.last_id
+            current_after = points.last_id
             for pt in points.data:
                 yield pt
         return None
@@ -221,6 +245,7 @@ class Points:
         *,
         document_id: typing.Optional[typing.Text] = None,
         content_md5: typing.Optional[typing.Text] = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> int:
         """
@@ -232,6 +257,7 @@ class Points:
             count = self._count(
                 document_id=document_id,
                 content_md5=content_md5,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
 
@@ -242,7 +268,11 @@ class Points:
         return count
 
     def content_exists(
-        self, content_md5: typing.Text, *, verbose: bool | None = None
+        self,
+        content_md5: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> bool:
         """
         Check if a point with the given content_md5 exists in the database.
@@ -256,6 +286,7 @@ class Points:
                 before=None,
                 limit=1,
                 order="asc",
+                conn=conn,
                 with_embedding=False,
                 verbose=self.dvs.v(verbose),
             )
@@ -267,6 +298,7 @@ class Points:
     def drop(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         force: bool = False,
         touch_after_drop: bool = True,
         verbose: bool | None = None,
@@ -280,9 +312,9 @@ class Points:
             raise ValueError("Use force=True to drop table.")
 
         with Timer() as timer:
-            self._drop(verbose=self.dvs.v(verbose))
+            self._drop(conn=conn, verbose=self.dvs.v(verbose))
             if touch_after_drop:
-                self._touch(verbose=self.dvs.v(verbose))
+                self._touch(conn=conn, verbose=self.dvs.v(verbose))
 
         if self.dvs.v(verbose):
             dur = timer.duration * 1000
@@ -295,6 +327,7 @@ class Points:
         *,
         document_id: typing.Text,
         content_md5: typing.Text,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> None:
         """
@@ -305,6 +338,7 @@ class Points:
             self._remove_outdated(
                 document_id=document_id,
                 content_md5=content_md5,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
 
@@ -321,6 +355,7 @@ class Points:
         *,
         document_ids: typing.Optional[typing.List[typing.Text]] = None,
         content_md5s: typing.Optional[typing.List[typing.Text]] = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> None:
         """
@@ -332,6 +367,7 @@ class Points:
                 point_ids=point_ids,
                 document_ids=document_ids,
                 content_md5s=content_md5s,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
 
@@ -341,7 +377,12 @@ class Points:
 
         return None
 
-    def _touch(self, *, verbose: bool | None = None) -> bool:
+    def _touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Initialize the points table with extensions and vector similarity search indexes.
         """  # noqa: E501
@@ -374,7 +415,8 @@ class Points:
             ).strip()
 
             try:
-                self.dvs.new_connection().cursor().sql(create_table_sql)
+                conn = conn or self.dvs.new_connection()
+                conn.cursor().sql(create_table_sql)
             except duckdb.CatalogException as e:
                 if "already exists" in str(e).lower():
                     logger.debug(f"Table '{dvs.DVS_POINTS_TABLE_NAME}' already exists")
@@ -394,6 +436,7 @@ class Points:
         self,
         point_id: typing.Text,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None,
         with_embedding: bool,
     ) -> "PointType":
@@ -410,12 +453,8 @@ class Points:
         parameters = [point_id]
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -441,6 +480,7 @@ class Points:
         self,
         points: typing.Sequence["PointType"],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None,
         batch_size: int,
     ) -> typing.List["PointType"]:
@@ -476,6 +516,7 @@ class Points:
         )
 
         with Timer() as timer:
+            conn = conn or self.dvs.new_connection()
             for _batch_pts in _iter_batch_pts:
                 parameters: typing.List[typing.Tuple[typing.Any, ...]] = []
                 for pt in _batch_pts:
@@ -495,7 +536,7 @@ class Points:
                 query = SQL_STMT_INSTALL_EXTENSIONS + f"\n{query}\n"
 
                 # Create points
-                self.dvs.new_connection().cursor().executemany(query, parameters)
+                conn.cursor().executemany(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
@@ -506,7 +547,13 @@ class Points:
 
         return list(points)
 
-    def _remove(self, point_id: typing.Text, *, verbose: bool | None) -> None:
+    def _remove(
+        self,
+        point_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None,
+    ) -> None:
         """
         Delete a single point from the database by its ID.
         """
@@ -518,7 +565,8 @@ class Points:
         parameters = [point_id]
 
         with Timer() as timer:
-            self.dvs.new_connection().cursor().execute(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -532,6 +580,7 @@ class Points:
     def _list(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         document_id: typing.Optional[typing.Text],
         content_md5: typing.Optional[typing.Text],
         after: typing.Optional[typing.Text],
@@ -576,15 +625,13 @@ class Points:
         query += f"LIMIT {fetch_limit}"
 
         with Timer() as timer:
+            conn = conn or self.dvs.new_connection(read_only=True)
             results: typing.List[typing.Dict] = [
                 {
                     column: json.loads(value) if column == "metadata" else value
                     for column, value in zip(columns, row)
                 }
-                for row in self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchall()
+                for row in conn.cursor().execute(query, parameters).fetchall()
             ]
 
         debug_print(
@@ -611,6 +658,7 @@ class Points:
     def _count(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         document_id: typing.Optional[typing.Text],
         content_md5: typing.Optional[typing.Text],
         verbose: bool | None,
@@ -633,12 +681,8 @@ class Points:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
         with Timer() as timer:
-            result = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(query, parameters)
-                .fetchone()
-            )
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -651,7 +695,9 @@ class Points:
 
         return count
 
-    def _drop(self, *, verbose: bool | None) -> None:
+    def _drop(
+        self, *, conn: duckdb.DuckDBPyConnection | None = None, verbose: bool | None
+    ) -> None:
         """
         Drop the points table from the database.
         """
@@ -660,7 +706,8 @@ class Points:
 
         # Drop table
         with Timer() as timer:
-            self.dvs.new_connection().cursor().sql(query)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().sql(query)
 
         debug_print(
             f"{query}",
@@ -674,6 +721,7 @@ class Points:
     def _remove_outdated(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         document_id: typing.Text,
         content_md5: typing.Text,
         verbose: bool | None = None,
@@ -688,7 +736,8 @@ class Points:
 
         # Remove outdated points
         with Timer() as timer:
-            self.dvs.new_connection().cursor().execute(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
@@ -703,6 +752,7 @@ class Points:
         self,
         point_ids: typing.Optional[typing.List[typing.Text]],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         document_ids: typing.Optional[typing.List[typing.Text]],
         content_md5s: typing.Optional[typing.List[typing.Text]],
         verbose: bool | None,
@@ -738,7 +788,8 @@ class Points:
 
         # Remove points
         with Timer() as timer:
-            self.dvs.new_connection().cursor().execute(query, parameters)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().execute(query, parameters)
 
         debug_print(
             f"{query}\n" + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}",

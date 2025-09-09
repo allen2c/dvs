@@ -7,6 +7,7 @@ import time
 import typing
 from concurrent.futures import ThreadPoolExecutor
 
+import duckdb
 from agents import OpenAIChatCompletionsModel, OpenAIResponsesModel
 
 import dvs
@@ -42,13 +43,18 @@ class Graph:
     def __init__(self, dvs: dvs.DVS):
         self.dvs = dvs
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """Initialize the property graph with required tables and extensions."""
         self.nodes.touch(verbose=self.dvs.v(verbose))
         self.edges.touch(verbose=self.dvs.v(verbose))
 
         with Timer() as timer:
-            conn = self.dvs.new_connection()
+            conn = conn or self.dvs.new_connection()
             # First, execute the extension installation
             conn.cursor().execute(SQL_STMT_LOAD_DUCKPGQ)
 
@@ -91,11 +97,16 @@ class Graph:
         logger.info(f"✅ Created property graph: '{dvs.DVS_GRAPH_TABLE_NAME}'")
         return True
 
-    def drop(self, *, verbose: bool | None = None) -> bool:
+    def drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         self.nodes.drop(verbose=self.dvs.v(verbose))
         self.edges.drop(verbose=self.dvs.v(verbose))
         with Timer() as timer:
-            conn = self.dvs.new_connection()
+            conn = conn or self.dvs.new_connection()
             conn.execute(SQL_STMT_LOAD_DUCKPGQ)
             conn.cursor().sql(
                 f"DROP PROPERTY GRAPH IF EXISTS {dvs.DVS_GRAPH_TABLE_NAME}"
@@ -111,6 +122,7 @@ class Graph:
     async def rebuild_graph(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         chat_model: OpenAIResponsesModel | OpenAIChatCompletionsModel,
         document_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
         model_semaphore: asyncio.Semaphore = asyncio.Semaphore(1),
@@ -122,11 +134,12 @@ class Graph:
             triplets_entities_from_document,
         )
 
-        self.drop(verbose=self.dvs.v(verbose))
-        self.touch(verbose=self.dvs.v(verbose))
+        self.drop(conn=conn, verbose=self.dvs.v(verbose))
+        self.touch(conn=conn, verbose=self.dvs.v(verbose))
 
         documents = [
-            doc for doc in self.dvs.db.documents.gen(verbose=self.dvs.v(verbose))
+            doc
+            for doc in self.dvs.db.documents.gen(conn=conn, verbose=self.dvs.v(verbose))
         ]
         documents_task = [
             triplets_entities_from_document(
@@ -163,35 +176,39 @@ class Graph:
             entities=entities,
             canonical_map=canonical_map,
         )
-        self.nodes.bulk_create(nodes)
-        self.edges.bulk_create(edges)
+        self.nodes.bulk_create(nodes, conn=conn)
+        self.edges.bulk_create(edges, conn=conn)
 
         logger.info("✨ Knowledge Graph Construction Complete! ✨")
         logger.info(f"Total Nodes: {len(nodes)}, Edges: {len(edges)}")
         return G
 
-    def to_nx(self) -> "nx.DiGraph":
+    def to_nx(self, *, conn: duckdb.DuckDBPyConnection | None = None) -> "nx.DiGraph":
         import networkx as nx
 
         G = nx.DiGraph()
-        for __node in self.nodes.gen():
+        for __node in self.nodes.gen(conn=conn):
             G.add_node(__node.node_id, **__node.model_dump())
-        for __edge in self.edges.gen(relation=RelationIsA):
+        for __edge in self.edges.gen(relation=RelationIsA, conn=conn):
             G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
-        for __edge in self.edges.gen(relation=RelationHasA):
+        for __edge in self.edges.gen(relation=RelationHasA, conn=conn):
             G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
-        for __edge in self.edges.gen(relation=RelationRelatedTo):
+        for __edge in self.edges.gen(relation=RelationRelatedTo, conn=conn):
             G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
-        for __edge in self.edges.gen(relation=RelationIsFrom):
+        for __edge in self.edges.gen(relation=RelationIsFrom, conn=conn):
             G.add_edge(__edge.from_node_id, __edge.to_node_id, **__edge.model_dump())
         return G
 
     def export(
-        self, path: pathlib.Path | str, *, format: typing.Literal["node_link", "gexf"]
+        self,
+        path: pathlib.Path | str,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        format: typing.Literal["node_link", "gexf"],
     ) -> pathlib.Path:
         from dvs.utils.dump_graph import dump_graph
 
-        G = self.to_nx()
+        G = self.to_nx(conn=conn)
         return dump_graph(G, path, format=format)
 
     @functools.cached_property
@@ -211,6 +228,7 @@ class Graph:
         from_node_id_or_label: str | None = None,
         to_node_id_or_label: str | None = None,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType | None = None,
         limit: int = 5,
         verbose: bool | None = None,
@@ -226,7 +244,7 @@ class Graph:
             if relation is None
             else [relation]
         )
-        conn = self.dvs.new_connection()
+        conn = conn or self.dvs.new_connection()
         conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         def run_query(
@@ -288,6 +306,7 @@ class Graph:
         from_node_id_or_label: str | None = None,
         to_node_id_or_label: str | None = None,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType | None = None,
         limit: int = 15,
         verbose: bool | None = None,
@@ -304,7 +323,7 @@ class Graph:
             if relation is None
             else [relation]
         )
-        conn = self.dvs.new_connection()
+        conn = conn or self.dvs.new_connection()
         conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         def run_query(
@@ -367,6 +386,7 @@ class Graph:
     def local_clustering_coefficient(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType,
         limit: int = 10,
         verbose: bool | None = None,
@@ -374,7 +394,7 @@ class Graph:
         """Calculate local clustering coefficient for nodes in the graph."""
         output: typing.List[typing.Tuple[typing.Text, float]] = []
 
-        conn = self.dvs.new_connection()
+        conn = conn or self.dvs.new_connection()
         conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         with Timer() as timer:
@@ -413,6 +433,7 @@ class Graph:
     def weakly_connected_component(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType,
         limit: int = 15,
         verbose: bool | None = None,
@@ -420,7 +441,7 @@ class Graph:
         """Find weakly connected components in the graph."""
         output: typing.List[typing.Tuple[typing.Text, int]] = []
 
-        conn = self.dvs.new_connection()
+        conn = conn or self.dvs.new_connection()
         conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         with Timer() as timer:
@@ -459,6 +480,7 @@ class Graph:
     def pagerank(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType,
         limit: int = 10,
         verbose: bool | None = None,
@@ -467,7 +489,7 @@ class Graph:
 
         output: typing.List[typing.Tuple[typing.Text, float]] = []
 
-        conn = self.dvs.new_connection()
+        conn = conn or self.dvs.new_connection()
         conn.execute(SQL_STMT_LOAD_DUCKPGQ)
 
         with Timer() as timer:
@@ -511,6 +533,7 @@ class Graph:
         per_hop_limit: int,
         *,
         cap_total: int | None = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> set[str]:
         """Expand entities via is_a in both directions using BFS."""
@@ -531,6 +554,7 @@ class Graph:
                         from_node_id_or_label=entity_id,
                         relation=RelationIsA,
                         limit=per_hop_limit,
+                        conn=conn,
                         verbose=self.dvs.v(verbose),
                     )
                 except Exception:
@@ -540,6 +564,7 @@ class Graph:
                         to_node_id_or_label=entity_id,
                         relation=RelationIsA,
                         limit=per_hop_limit,
+                        conn=conn,
                         verbose=self.dvs.v(verbose),
                     )
                 except Exception:
@@ -575,6 +600,7 @@ class Graph:
         per_entity_limit: int,
         *,
         cap_total: int | None = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> set[str]:
         """Expand entities via has_a one hop in both directions."""
@@ -589,6 +615,7 @@ class Graph:
                     from_node_id_or_label=eid,
                     relation=RelationHasA,
                     limit=per_entity_limit,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
             except Exception:
@@ -598,6 +625,7 @@ class Graph:
                     to_node_id_or_label=eid,
                     relation=RelationHasA,
                     limit=per_entity_limit,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
             except Exception:
@@ -617,6 +645,7 @@ class Graph:
         entity_ids: set[str],
         top_percent: float,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType = RelationRelatedTo,
         limit: int = 5000,
     ) -> set[str]:
@@ -624,7 +653,7 @@ class Graph:
         if not entity_ids:
             return set()
         try:
-            pr = self.pagerank(relation=relation, limit=limit, verbose=False)
+            pr = self.pagerank(conn=conn, relation=relation, limit=limit, verbose=False)
             pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
             if not pr_map:
                 return set(entity_ids)
@@ -642,6 +671,7 @@ class Graph:
         per_entity_limit: int,
         *,
         cap_entities: int | None = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> set[str]:
         """Collect document ids reachable via is_from from entities."""
@@ -659,6 +689,7 @@ class Graph:
                     from_node_id_or_label=eid,
                     relation=RelationIsFrom,
                     limit=per_entity_limit,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
             except Exception:
@@ -671,7 +702,11 @@ class Graph:
         return collected
 
     def centroid_for_document(
-        self, doc_id: str, *, limit_points: int = 5
+        self,
+        doc_id: str,
+        *,
+        limit_points: int = 5,
+        conn: duckdb.DuckDBPyConnection | None = None,
     ) -> list[float]:
         """Compute centroid from a document's point embeddings."""
         vectors: list[list[float]] = []
@@ -680,6 +715,7 @@ class Graph:
                 document_id=doc_id,
                 limit=limit_points,
                 with_embedding=True,
+                conn=conn,
                 verbose=False,
             )
             for p in pts:
@@ -691,7 +727,9 @@ class Graph:
 
         return mean_vector(vectors)
 
-    async def embed_query_vector(self, query: str) -> list[float]:
+    async def embed_query_vector(
+        self, query: str, *, conn: duckdb.DuckDBPyConnection | None = None
+    ) -> list[float]:
         """Embed a query string and return a single vector."""
         return (
             await asyncio.to_thread(
@@ -701,7 +739,9 @@ class Graph:
             )
         ).to_python()[0]
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(
+        self, texts: list[str], *, conn: duckdb.DuckDBPyConnection | None = None
+    ) -> list[list[float]]:
         """Embed multiple texts and return vectors."""
         return (
             await asyncio.to_thread(
@@ -716,6 +756,7 @@ class Graph:
         document_ids: list[str],
         *,
         limit_per_doc: int = 10,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> set[str]:
         """Collect entities connected to documents via is_from edges."""
@@ -723,12 +764,13 @@ class Graph:
         for doc_id in document_ids:
             try:
                 doc_node = self.nodes.retrieve_by_label(
-                    doc_id, verbose=self.dvs.v(verbose)
+                    doc_id, conn=conn, verbose=self.dvs.v(verbose)
                 )
                 neighbors = self.get_neighbors(
                     to_node_id_or_label=doc_node.node_id,
                     relation=RelationIsFrom,
                     limit=limit_per_doc,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
                 for from_node, _edge, to_node in neighbors:
@@ -746,6 +788,7 @@ class Graph:
         *,
         per_doc_limit: int = 10,
         with_embedding: bool = True,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> list[Point]:
         """Gather points for documents; optionally include embeddings."""
@@ -756,6 +799,7 @@ class Graph:
                     document_id=doc_id,
                     limit=per_doc_limit,
                     with_embedding=with_embedding,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
                 points.extend(pts)
@@ -784,6 +828,7 @@ class Graph:
         suppress_hubs: bool = True,
         hub_pagerank_top_percent: float = 0.1,
         cap_total: int | None = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> set[str]:
         """Expand entities via is_a and has_a, then suppress hubs by PageRank."""
@@ -794,6 +839,7 @@ class Graph:
                 is_a_max_hops,
                 is_a_limit_per_hop,
                 cap_total=cap_total,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
         if has_a_enabled and expanded:
@@ -801,12 +847,14 @@ class Graph:
                 expanded,
                 has_a_limit_per_entity,
                 cap_total=cap_total,
+                conn=conn,
                 verbose=self.dvs.v(verbose),
             )
         if suppress_hubs and expanded:
             expanded = self.suppress_hubs_by_pagerank(
                 expanded,
                 hub_pagerank_top_percent,
+                conn=conn,
                 relation=RelationRelatedTo,
                 limit=5000,
             )
@@ -857,6 +905,7 @@ class Graph:
         has_a_limit_per_entity: int,
         suppress_hubs: bool,
         hub_pagerank_top_percent: float,
+        conn: duckdb.DuckDBPyConnection | None = None,
     ) -> float:
         """Return normalized graph importance [0,1] for a document node."""
         if document_id in pagerank_map and max_pagerank > 0:
@@ -867,6 +916,7 @@ class Graph:
                 to_node_id_or_label=document_id,
                 relation=RelationIsFrom,
                 limit=30,
+                conn=conn,
                 verbose=False,
             )
             entities: set[str] = set()
@@ -879,6 +929,7 @@ class Graph:
                     entities,
                     is_a_max_hops,
                     is_a_limit_per_hop,
+                    conn=conn,
                     verbose=False,
                 )
 
@@ -886,6 +937,7 @@ class Graph:
                 entities |= self.expand_has_a_one_hop(
                     entities,
                     has_a_limit_per_entity,
+                    conn=conn,
                     verbose=False,
                 )
 
@@ -893,6 +945,7 @@ class Graph:
                 entities = self.suppress_hubs_by_pagerank(
                     entities,
                     hub_pagerank_top_percent,
+                    conn=conn,
                     relation=RelationRelatedTo,
                     limit=5000,
                 )
@@ -907,13 +960,18 @@ class Graph:
             return 0.0
 
     def get_graph_distance_score(
-        self, document_id: str, original_doc_ids: list[str]
+        self,
+        document_id: str,
+        original_doc_ids: list[str],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
     ) -> float:
         """Distance score [0,1] derived from shortest path to seeds."""
         return self.calculate_graph_relevance(
             document_id,
             original_doc_ids,
             related_entities=set(),
+            conn=conn,
             verbose=False,
         )
 
@@ -922,6 +980,7 @@ class Graph:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         graph_expansion_depth: int = 1,
         vector_weight: float = 0.7,
         graph_weight: float = 0.3,
@@ -991,6 +1050,7 @@ class Graph:
             try:
                 doc_node = self.nodes.retrieve_by_label(
                     doc_id,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
                 document_nodes.append(doc_node)
@@ -1001,7 +1061,7 @@ class Graph:
         related_entities: set[str] = set()
         if document_ids:
             related_entities = self.collect_entities_via_is_from_for_documents(
-                document_ids, limit_per_doc=10, verbose=self.dvs.v(verbose)
+                document_ids, limit_per_doc=10, conn=conn, verbose=self.dvs.v(verbose)
             )
 
         # Step 3b: Expand entities using is_a (multi-hop as synonym),
@@ -1045,6 +1105,7 @@ class Graph:
                         from_node_id_or_label=entity_id,
                         relation=typing.cast(RelationType, RelationIsFrom),
                         limit=5,
+                        conn=conn,
                         verbose=False,
                     )
                     for _fn, _edge, to_node in neighbors:
@@ -1063,6 +1124,7 @@ class Graph:
                         from_node_id_or_label=eid,
                         relation=RelationRelatedTo,
                         limit=related_to_limit_per_entity,
+                        conn=conn,
                         verbose=False,
                     )
                 except Exception:
@@ -1072,6 +1134,7 @@ class Graph:
                         to_node_id_or_label=eid,
                         relation=RelationRelatedTo,
                         limit=related_to_limit_per_entity,
+                        conn=conn,
                         verbose=False,
                     )
                 except Exception:
@@ -1104,6 +1167,7 @@ class Graph:
                 expanded_entity_ids = self.suppress_hubs_by_pagerank(
                     expanded_entity_ids,
                     hub_pagerank_top_percent,
+                    conn=conn,
                     relation=RelationRelatedTo,
                     limit=5000,
                 )
@@ -1184,7 +1248,7 @@ class Graph:
         for point, vector_score in scored_candidates:
             try:
                 doc = self.dvs.db.documents.retrieve(
-                    point.document_id, verbose=self.dvs.v(verbose)
+                    point.document_id, conn=conn, verbose=self.dvs.v(verbose)
                 )
 
                 # Calculate graph relevance: based on distance to original
@@ -1250,6 +1314,7 @@ class Graph:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         relation_types: list[str] | None = None,
         centrality_threshold: float = 0.5,
         vector_weight: float = 0.6,
@@ -1294,6 +1359,8 @@ class Graph:
         # no direct Relation import needed; using existing helpers
         from dvs.utils.cosine_similarity import cosine_similarity
 
+        conn = conn or self.dvs.new_connection()
+
         # Start timing
         start_time = time.perf_counter()
 
@@ -1316,6 +1383,7 @@ class Graph:
         pagerank_results = self.dvs.db.graph.pagerank(
             relation=relation_type,  # type: ignore
             limit=top_k * 10,  # Get more candidates for filtering
+            conn=conn,
             verbose=self.dvs.v(verbose),
         )
 
@@ -1385,19 +1453,21 @@ class Graph:
                 next_frontier: set[str] = set()
                 for eid in list(frontier):
                     try:
-                        outs = self.dvs.db.graph.get_neighbors(
+                        outs = self.get_neighbors(
                             from_node_id_or_label=eid,
                             relation=RelationIsA,
                             limit=is_a_limit_per_hop,
+                            conn=conn,
                             verbose=False,
                         )
                     except Exception:
                         outs = []
                     try:
-                        ins = self.dvs.db.graph.get_neighbors(
+                        ins = self.get_neighbors(
                             to_node_id_or_label=eid,
                             relation=RelationIsA,
                             limit=is_a_limit_per_hop,
+                            conn=conn,
                             verbose=False,
                         )
                     except Exception:
@@ -1417,19 +1487,21 @@ class Graph:
             seeds: list[str] = list(expanded_entities)[:500]
             for eid in seeds:
                 try:
-                    outs = self.dvs.db.graph.get_neighbors(
+                    outs = self.get_neighbors(
                         from_node_id_or_label=eid,
                         relation=RelationHasA,
                         limit=has_a_limit_per_entity,
+                        conn=conn,
                         verbose=False,
                     )
                 except Exception:
                     outs = []
                 try:
-                    ins = self.dvs.db.graph.get_neighbors(
+                    ins = self.get_neighbors(
                         to_node_id_or_label=eid,
                         relation=RelationHasA,
                         limit=has_a_limit_per_entity,
+                        conn=conn,
                         verbose=False,
                     )
                 except Exception:
@@ -1442,20 +1514,13 @@ class Graph:
         # Hub suppression on expanded entities
         if suppress_hubs and expanded_entities:
             try:
-                pr = self.dvs.db.graph.pagerank(
-                    relation=RelationRelatedTo, limit=5000, verbose=False
+                expanded_entities = self.suppress_hubs_by_pagerank(
+                    expanded_entities,
+                    hub_pagerank_top_percent,
+                    conn=conn,
+                    relation=RelationRelatedTo,
+                    limit=5000,
                 )
-                pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
-                if pr_map:
-                    scores: list[float] = sorted(pr_map.values(), reverse=True)
-                    pct: float = max(0.0, min(1.0, hub_pagerank_top_percent))
-                    idx: int = max(0, min(len(scores) - 1, int(len(scores) * pct) - 1))
-                    cutoff: float = scores[idx]
-                    expanded_entities = {
-                        eid
-                        for eid in expanded_entities
-                        if pr_map.get(eid, 0.0) < cutoff
-                    }
             except Exception:
                 pass
 
@@ -1467,6 +1532,7 @@ class Graph:
                     from_node_id_or_label=node_id,
                     relation=RelationIsFrom,
                     limit=5,
+                    conn=conn,
                     verbose=self.dvs.v(verbose),
                 )
                 for _, _, doc_node in neighbors:
@@ -1571,7 +1637,9 @@ class Graph:
                 vector_similarity = cosine_similarity(query_vector, point_vector)
 
                 # Find the document this point belongs to
-                doc = self.dvs.db.documents.retrieve(point.document_id, verbose=False)
+                doc = self.dvs.db.documents.retrieve(
+                    point.document_id, conn=conn, verbose=False
+                )
 
                 # Get graph importance score for this document's related entities
                 graph_importance = 0.0
@@ -1580,13 +1648,14 @@ class Graph:
                         # Check if this document is related to the important entity
                         # Match by document label, not node_id
                         doc_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                            doc.document_id, verbose=False
+                            doc.document_id, conn=conn, verbose=False
                         )
                         neighbors = self.dvs.db.graph.get_neighbors(
                             from_node_id_or_label=node_id,
                             to_node_id_or_label=doc_node.node_id,
                             relation=RelationIsFrom,
                             limit=1,
+                            conn=conn,
                             verbose=False,
                         )
                         if neighbors:
@@ -1649,11 +1718,11 @@ class Graph:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         vector_weight: float = 0.5,
         graph_importance_weight: float = 0.3,
         graph_distance_weight: float = 0.2,
         with_embedding: bool = False,
-        # Expansion and hub controls
         is_a_max_hops: int = 3,
         is_a_limit_per_hop: int = 20,
         has_a_enabled: bool = True,
@@ -1711,7 +1780,8 @@ class Graph:
         original_doc_ids: list[str] = [doc.document_id for _, doc, _ in initial_results]
 
         # Step 2: Prepare PageRank-based graph importance
-        pagerank_results = self.dvs.db.graph.pagerank(
+        pagerank_results = self.pagerank(
+            conn=conn,
             relation=RelationRelatedTo,  # Use general semantic connectivity
             limit=top_k * 50,
             verbose=self.dvs.v(verbose),
@@ -1803,6 +1873,7 @@ class Graph:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         max_iterations: int = 3,
         refinement_threshold: float = 0.05,
         expansions_per_iter: int = 3,
@@ -1857,7 +1928,7 @@ class Graph:
             raise ValueError("query_expander must be provided for LLM-based expansion.")
 
         # Step 0: Prepare baseline using original query
-        base_vector: list[float] = await self.embed_query_vector(query)
+        base_vector: list[float] = await self.embed_query_vector(query, conn=conn)
 
         baseline_results = await VSS.vector_search(
             vector=base_vector,
@@ -1865,7 +1936,7 @@ class Graph:
             embedding_dimensions=self.dvs.db_manifest.embedding_dimensions,
             documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
             points_table_name=dvs.DVS_POINTS_TABLE_NAME,
-            conn=self.dvs.new_connection(read_only=True),
+            conn=conn or self.dvs.new_connection(read_only=True),
             with_embedding=False,
             debug=self.dvs.v(verbose),
             console=self.dvs.settings.console,
@@ -1907,12 +1978,12 @@ class Graph:
             )
 
             # 2) Embed expansions
-            expanded_vectors = await self.embed_texts(expanded_queries)
+            expanded_vectors = await self.embed_texts(expanded_queries, conn=conn)
 
             # 2b) Graph-guided expansion (is_from 1-hop) to boost recall
             seed_doc_ids: list[str] = [doc.document_id for _, doc, _ in best_results]
             entity_ids: set[str] = self.collect_entities_via_is_from_for_documents(
-                seed_doc_ids, limit_per_doc=300, verbose=False
+                seed_doc_ids, limit_per_doc=300, conn=conn, verbose=False
             )
 
             # Expand entities via is_a multi-hop, then has_a 1-hop
@@ -1925,6 +1996,7 @@ class Graph:
                 suppress_hubs=suppress_hubs,
                 hub_pagerank_top_percent=hub_pagerank_top_percent,
                 cap_total=None,
+                conn=conn,
                 verbose=False,
             )
 
@@ -1933,6 +2005,7 @@ class Graph:
                 expanded_entities_iter,
                 per_entity_limit=8,
                 cap_entities=150,
+                conn=conn,
                 verbose=False,
             )
 
@@ -1959,6 +2032,7 @@ class Graph:
                 list(new_graph_docs)[:150],
                 per_doc_limit=3,
                 with_embedding=True,
+                conn=conn,
                 verbose=False,
             )
             for pt in pts:
@@ -1992,7 +2066,7 @@ class Graph:
                 embedding_dimensions=self.dvs.db_manifest.embedding_dimensions,
                 documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
                 points_table_name=dvs.DVS_POINTS_TABLE_NAME,
-                conn=self.dvs.new_connection(read_only=True),
+                conn=conn or self.dvs.new_connection(read_only=True),
                 with_embedding=False,
                 debug=self.dvs.v(verbose),
                 console=self.dvs.settings.console,
@@ -2066,10 +2140,10 @@ class Graph:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         context_similarity_threshold: float = 0.7,
         max_expansion_steps: int = 2,
         with_embedding: bool = False,
-        # Expansion and hub controls
         is_a_max_hops: int = 3,
         is_a_limit_per_hop: int = 20,
         has_a_enabled: bool = True,
@@ -2111,6 +2185,8 @@ class Graph:
         # Start timing
         start_time = time.perf_counter()
 
+        conn = conn or self.dvs.new_connection()
+
         # 0) Baseline vector search to get seed context
         baseline_results: list[tuple[Point, Document, float]] = await self.dvs.search(
             query=query,
@@ -2139,6 +2215,7 @@ class Graph:
                         document_id=doc.document_id,
                         limit=3,
                         with_embedding=True,
+                        conn=conn,
                         verbose=False,
                     )
                     for p in pts:
@@ -2198,12 +2275,13 @@ class Graph:
         for _pt, doc, _ in baseline_results:
             try:
                 doc_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                    doc.document_id, verbose=False
+                    doc.document_id, conn=conn, verbose=False
                 )
                 neighbors = self.dvs.db.graph.get_neighbors(
                     to_node_id_or_label=doc_node.node_id,
                     relation=RelationIsFrom,
                     limit=200,
+                    conn=conn,
                     verbose=False,
                 )
                 for from_node, _edge, to_node in neighbors:
@@ -2224,6 +2302,7 @@ class Graph:
             is_a_max_hops,
             is_a_limit_per_hop,
             cap_total=None,
+            conn=conn,
             verbose=False,
         )
         if has_a_enabled and expanded_entities5:
@@ -2231,6 +2310,7 @@ class Graph:
                 expanded_entities5,
                 has_a_limit_per_entity,
                 cap_total=None,
+                conn=conn,
                 verbose=False,
             )
 
@@ -2239,6 +2319,7 @@ class Graph:
             expanded_entities5 = self.suppress_hubs_by_pagerank(
                 expanded_entities5,
                 hub_pagerank_top_percent,
+                conn=conn,
                 relation=RelationRelatedTo,
                 limit=5000,
             )
@@ -2310,7 +2391,9 @@ class Graph:
         log_counter: int = 0
         for doc_id in list(candidate_doc_ids)[:500]:
             try:
-                cand_centroid: list[float] = self.centroid_for_document(doc_id)
+                cand_centroid: list[float] = self.centroid_for_document(
+                    doc_id, conn=conn
+                )
                 if not cand_centroid:
                     if self.dvs.v(verbose) and log_counter < 10:
                         logger.debug(f"[S5] skip doc={doc_id} (no centroid)")
@@ -2331,7 +2414,7 @@ class Graph:
                         log_counter += 1
                     continue
                 combined: float = alpha * vec_sim + beta * ctx_sim
-                doc = self.dvs.db.documents.retrieve(doc_id, verbose=False)
+                doc = self.dvs.db.documents.retrieve(doc_id, conn=conn, verbose=False)
                 scored.append((doc, combined, vec_sim, ctx_sim))
                 if self.dvs.v(verbose) and log_counter < 10:
                     logger.debug(
@@ -2400,6 +2483,7 @@ class Graph:
         original_doc_ids: list[str],
         related_entities: set[str],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> float:
         """Calculate graph relevance for a document"""
@@ -2414,13 +2498,13 @@ class Graph:
             # Try to find target document node
             # Resolve by label (document_id)
             target_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                target_doc_id, verbose=self.dvs.v(verbose)
+                target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
             )
 
             for original_doc_id in original_doc_ids:
                 try:
                     original_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                        original_doc_id, verbose=False
+                        original_doc_id, conn=conn, verbose=False
                     )
 
                     # Calculate shortest path distance
@@ -2428,6 +2512,7 @@ class Graph:
                         from_node_id_or_label=original_node.node_id,
                         to_node_id_or_label=target_node.node_id,
                         limit=1,
+                        conn=conn,
                         verbose=False,
                     )
 

@@ -20,29 +20,43 @@ class DB:
         """Initialize database API with DVS instance."""
         self.dvs = dvs
 
-    def touch(self, *, enable_graph: bool = False, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        enable_graph: bool = False,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Initialize the DuckDB database tables required for vector similarity search.
         Creates manifest, documents, and points tables with proper schemas and indexes.
         Installs required DuckDB extensions and sets up HNSW indexing for searches.
         """
-        if not self.manifest.touch(verbose=self.dvs.v(verbose)):
+        if not self.manifest.touch(conn=conn, verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the manifest table")
-        if not self.documents.touch(verbose=self.dvs.v(verbose)):
+        if not self.documents.touch(conn=conn, verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the documents table")
-        if not self.points.touch(verbose=self.dvs.v(verbose)):
+        if not self.points.touch(conn=conn, verbose=self.dvs.v(verbose)):
             raise ValueError("Failed to touch the points table")
-        if enable_graph and not self.graph.touch(verbose=self.dvs.v(verbose)):
+        if enable_graph and not self.graph.touch(
+            conn=conn, verbose=self.dvs.v(verbose)
+        ):
             raise ValueError("Failed to touch the graph table")
         return True
 
-    def install_extensions(self, *, verbose: bool | None = None) -> bool:
+    def install_extensions(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Install required DuckDB extensions for the database.
         """
 
         with Timer() as timer:
-            self.dvs.new_connection().cursor().sql(SQL_STMT_INSTALL_EXTENSIONS)
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().sql(SQL_STMT_INSTALL_EXTENSIONS)
 
         debug_print(
             SQL_STMT_INSTALL_EXTENSIONS,
@@ -53,16 +67,16 @@ class DB:
 
         return True
 
-    def show_table_names(self) -> typing.Tuple[typing.Text, ...]:
+    def show_table_names(
+        self, *, conn: duckdb.DuckDBPyConnection | None = None
+    ) -> typing.Tuple[typing.Text, ...]:
         """
         Return the names of all tables in the database.
         """
         try:
+            conn = conn or self.dvs.new_connection(read_only=True)
             res: typing.List[typing.Tuple[typing.Text]] = (
-                self.dvs.new_connection(read_only=True)
-                .cursor()
-                .execute(SQL_STMT_SHOW_TABLES)
-                .fetchall()
+                conn.cursor().execute(SQL_STMT_SHOW_TABLES).fetchall()
             )
             return tuple(r[0] for r in res)
         except duckdb.IOException as e:
