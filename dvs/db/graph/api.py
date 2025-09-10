@@ -532,164 +532,6 @@ class Graph:
 
         return out
 
-    async def search_hybrid_scoring(
-        self,
-        query: str,
-        top_k: int = 3,
-        *,
-        conn: duckdb.DuckDBPyConnection | None = None,
-        vector_weight: float = 0.5,
-        graph_importance_weight: float = 0.3,
-        graph_distance_weight: float = 0.2,
-        with_embedding: bool = False,
-        is_a_max_hops: int = 3,
-        is_a_limit_per_hop: int = 20,
-        has_a_enabled: bool = True,
-        has_a_limit_per_entity: int = 3,
-        suppress_hubs: bool = True,
-        hub_pagerank_top_percent: float = 0.1,
-        verbose: bool | None = None,
-    ) -> list[GraphRAGResult]:
-        """Strategy 3: weighted blend of vector score, graph importance, distance.
-        Start with vector candidates, add PageRank-based importance and
-        shortest-path distance to seed docs, then combine by weights.
-
-        Pros: balances precision/recall; uses structure+semantics; explainable parts.
-        Cons: needs weight tuning; adds PR/shortest-path cost; double-count risk.
-        Use when: you can calibrate weights offline and want stable cross-domain
-        performance.
-
-        Diagram (Mermaid):
-        ```mermaid
-        flowchart TD
-            Q[Query] --> VS[Vector Search x3 top-k]
-            VS --> Seeds[Original Docs]
-            Seeds --> OIDs[Original Doc IDs]
-            PR[PageRank RelatedTo] --> ImpMap[Importance Map]
-            OIDs --> Dist[Shortest Path Distance]
-            VS --> Cand[Candidates]
-            Cand --> VScore[Vector Score]
-            ImpMap --> GImp[Graph Importance]
-            Dist --> GDist[Graph Distance]
-            VScore --> Combine[Weighted Sum]
-            GImp --> Combine
-            GDist --> Combine
-            Combine --> TopK[Top-k Results]
-        ```
-        """
-        # using helpers; no direct Relation imports needed here
-
-        # Start timing
-        start_time = time.perf_counter()
-
-        # cosine_similarity not needed in Strategy 3
-        # Step 1: Initial vector search to get candidate points
-        initial_results: list[tuple["Point", "Document", float]] = (
-            await self.dvs.search(
-                query=query,
-                top_k=max(1, top_k * 3),
-                with_embedding=with_embedding,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
-        )
-
-        if not initial_results:
-            return []
-
-        original_doc_ids: list[str] = [doc.document_id for _, doc, _ in initial_results]
-
-        # Step 2: Prepare PageRank-based graph importance
-        pagerank_results = self.dvs.db.graph.algorithm.pagerank(
-            conn=conn,
-            relation=RelationRelatedTo,  # Use general semantic connectivity
-            limit=top_k * 50,
-            verbose=self.dvs.v(verbose),
-        )
-
-        pagerank_map: dict[str, float] = {
-            node_id: score for node_id, score in pagerank_results
-        }
-        max_pagerank: float = max(pagerank_map.values()) if pagerank_map else 1.0
-
-        def get_graph_importance_for_document(document_id: str) -> float:
-            return self.dvs.db.graph.utils.get_graph_importance_for_document(
-                document_id,
-                pagerank_map=pagerank_map,
-                max_pagerank=max_pagerank,
-                is_a_max_hops=is_a_max_hops,
-                is_a_limit_per_hop=is_a_limit_per_hop,
-                has_a_enabled=has_a_enabled,
-                has_a_limit_per_entity=has_a_limit_per_entity,
-                suppress_hubs=suppress_hubs,
-                hub_pagerank_top_percent=hub_pagerank_top_percent,
-            )
-
-        # Step 3: Compute distance-based score using shortest paths to originals
-        # Reuse _calculate_graph_relevance which maps distance to [0,1]
-        def get_graph_distance_score(document_id: str) -> float:
-            return self.dvs.db.graph.utils.get_graph_distance_score(
-                document_id, original_doc_ids
-            )
-
-        # Step 4: Combine scores
-        combined_results: list[tuple[Point, Document, float, float, float]] = []
-
-        for point, doc, vector_score in initial_results:
-            try:
-                graph_importance: float = get_graph_importance_for_document(
-                    doc.document_id
-                )
-                graph_distance_score: float = get_graph_distance_score(doc.document_id)
-
-                combined_score: float = (
-                    vector_weight * float(vector_score)
-                    + graph_importance_weight * graph_importance
-                    + graph_distance_weight * graph_distance_score
-                )
-
-                combined_results.append(
-                    (
-                        point,
-                        doc,
-                        combined_score,
-                        float(graph_importance),
-                        float(graph_distance_score),
-                    )
-                )
-            except Exception:
-                continue
-
-        # Step 5: Sort and return top-k
-        combined_results.sort(key=lambda x: x[2], reverse=True)
-        top = combined_results[:top_k]
-        max_score: float = float(top[0][2]) if top else 1.0
-        out: list[GraphRAGResult] = []
-        for idx, (_p, doc, combined, gimp, gdist) in enumerate(top, start=1):
-            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
-            out.append(
-                GraphRAGResult(
-                    document=doc,
-                    score=float(combined),
-                    vector_score=None,
-                    graph_score=float(0.5 * (gimp + gdist)),
-                    iterations=None,
-                    rank=idx,
-                    normalized_score=norm,
-                    strategy="hybrid_scoring",
-                )
-            )
-
-        # End timing and log performance
-        end_time = time.perf_counter()
-        duration_ms = (end_time - start_time) * 1000
-        logger.info(
-            f"🔍 [Strategy 3: hybrid_scoring] Query: '{query[:50]}...' | "
-            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
-        )
-
-        return out
-
     async def search_iterative_refinement(
         self,
         query: str,
@@ -711,7 +553,7 @@ class Graph:
         hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 4: iterate expand → embed → search until gains are small.
+        """Strategy 3: iterate expand → embed → search until gains are small.
         LLM expands queries; graph adds new docs via entities; merge vectors and
         re-search; stop on low improvement or max iterations.
 
@@ -980,7 +822,7 @@ class Graph:
         hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 5: baseline seeds → is_from expand → context-centroid ranking.
+        """Strategy 4: baseline seeds → is_from expand → context-centroid ranking.
         Build a centroid from seed points, expand via entities, filter by context
         similarity, then rank with a blend of query and context similarity.
 
