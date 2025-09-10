@@ -21,6 +21,7 @@ if typing.TYPE_CHECKING:
     from dvs.db.api import DB
     from dvs.tokens import Tokens
     from dvs.types.manifest import Manifest as ManifestType
+    from dvs.utils.api import Utils
 
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,12 @@ class DVS:
         from dvs.tokens import Tokens
 
         return Tokens(self)
+
+    @functools.cached_property
+    def utils(self) -> "Utils":
+        from dvs.utils.api import Utils
+
+        return Utils(self)
 
     def v(self, verbose: bool | None = None) -> bool:
         """Get verbosity setting, with optional override."""
