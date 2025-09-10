@@ -15,12 +15,10 @@ class GraphRAGResult(pydantic.BaseModel):
     iterations: int | None = None
     rank: int | None = None
     normalized_score: float | None = None
-    strategy: (
-        Literal[
-            "vector_expansion",
-            "graph_guided",
-            "hybrid_scoring",
-            "iterative_refinement",
-        ]
-        | None
-    ) = None
+    strategy: Literal[
+        "default",
+        "vector_expansion",
+        "graph_guided",
+        "iterative_refinement",
+        "context_aware",
+    ] = "default"

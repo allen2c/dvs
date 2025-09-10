@@ -425,11 +425,12 @@ class Utils:
         *,
         top_k: int,
         strategy: typing.Literal[
+            "default",
             "vector_expansion",
             "graph_guided",
-            "hybrid_scoring",
+            "context_aware",
             "iterative_refinement",
-        ],
+        ] = "default",
         graph_score_value: float | None = 0.0,
     ) -> list[GraphRAGResult]:
         """Convert vector-only results into GraphRAGResult with normalization."""

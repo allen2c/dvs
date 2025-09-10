@@ -712,56 +712,32 @@ class Graph:
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         context_similarity_threshold: float = 0.7,
-        max_expansion_steps: int = 2,
-        with_embedding: bool = False,
-        is_a_max_hops: int = 3,
-        is_a_limit_per_hop: int = 20,
-        has_a_enabled: bool = True,
-        has_a_limit_per_entity: int = 3,
-        suppress_hubs: bool = True,
-        hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 4: baseline seeds → is_from expand → context-centroid ranking.
-        Build a centroid from seed points, expand via entities, filter by context
-        similarity, then rank with a blend of query and context similarity.
+        """
+        Simplified Strategy 4: Context-Aware Search
 
-        Pros: low-latency; mitigates semantic drift via context filter; explainable.
-        Cons: needs embeddings; sparse graphs reduce gains; threshold sensitive.
-        Use when: you prefer contextual precision with tight latency and minimal
-        global graph prerequisites; hub suppression optional.
+        Core concept: Use context centroid to prevent semantic drift.
+        1. Baseline vector search → get seed documents
+        2. Build context centroid from seed embeddings
+        3. Simple entity expansion via is_from
+        4. Score candidates with dual similarity (query + context)
+        5. Filter by context threshold to maintain relevance
 
-        Diagram (Mermaid):
-        ```mermaid
-        flowchart TD
-            Q[Query] --> VS[Baseline Vector Search]
-            VS --> Seeds[Seed Points + Docs]
-            Seeds --> Ctx[Compute Context Centroid]
-            Seeds --> Ent[Entities via is_from]
-            Ent -->|is_a/has_a| E[Expanded Entities]
-            E --> Docs[Collect Candidate Docs]
-            Docs --> Cent[Doc Centroids]
-            Q --> Embed[Embed Query]
-            Cent --> QSim[Query vs Doc Similarity]
-            Ctx --> CSim[Context vs Doc Similarity]
-            QSim --> Filter[Context Threshold]
-            CSim --> Filter
-            Filter --> Rank[Rank and Normalize]
-            Rank --> TopK[Top-k Results]
-        ```
+        Simplified: Removed complex hub suppression, multi-hop expansion,
+        and excessive logging. Focus on core context-aware scoring.
         """
         from dvs.utils.cosine_similarity import cosine_similarity
+        from dvs.utils.graph_ops import mean_vector
 
-        # Start timing
         start_time = time.perf_counter()
-
         conn = conn or self.dvs.new_connection()
 
-        # 0) Baseline vector search to get seed context
+        # Step 1: Baseline vector search to get seed context
         baseline_results: list[tuple[Point, Document, float]] = await self.dvs.search(
             query=query,
-            top_k=max(1, top_k),
-            with_embedding=True,  # need embeddings to compute centroids
+            top_k=max(3, top_k),  # Get more seeds for better centroid
+            with_embedding=True,
             conn=conn,
             verbose=self.dvs.v(verbose),
         )
@@ -769,81 +745,52 @@ class Graph:
         if not baseline_results:
             return []
 
-        # 1) Build context centroid from seed points
-
+        # Step 2: Build context centroid from seed embeddings
         seed_vectors: list[list[float]] = []
         seed_doc_ids: list[str] = []
+
         for pt, doc, _ in baseline_results:
             if pt.embedding:
                 seed_vectors.append(pt.to_python())
             seed_doc_ids.append(doc.document_id)
 
-        # If no embeddings returned, fetch a few points per doc with embeddings
+        # Fallback to fetch embeddings if none found
         if not seed_vectors:
-            for _pt, doc, _ in baseline_results:
-                try:
-                    pts = self.dvs.db.points.gen(
-                        document_id=doc.document_id,
-                        limit=3,
-                        with_embedding=True,
-                        conn=conn,
-                        verbose=False,
-                    )
-                    for p in pts:
-                        if p.embedding:
-                            seed_vectors.append(p.to_python())
-                except Exception:
-                    continue
-
-        if self.dvs.v(verbose):
-            logger.debug(
-                (
-                    f"[S5] seeds={len(baseline_results)} "
-                    + f"seed_vecs(before_fetch)={len(seed_vectors)}"
+            for doc in baseline_results:
+                pts = self.dvs.db.points.gen(
+                    document_id=doc[1].document_id,
+                    limit=3,
+                    with_embedding=True,
+                    conn=conn,
+                    verbose=False,
                 )
-            )
+                for p in pts:
+                    if p.embedding:
+                        seed_vectors.append(p.to_python())
 
-        # If still empty, fallback return baseline wrapped
+        # If still no embeddings, return baseline results
         if not seed_vectors:
-            max_score: float = (
-                float(baseline_results[0][2]) if baseline_results else 1.0
-            )
-            if self.dvs.v(verbose):
-                logger.info("[S5] No seed embeddings; fallback to baseline results")
+            max_score = float(baseline_results[0][2]) if baseline_results else 1.0
             return [
                 GraphRAGResult(
                     document=doc,
                     score=float(sc),
                     vector_score=float(sc),
-                    graph_score=None,
+                    graph_score=0.0,
                     iterations=0,
                     rank=i + 1,
-                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                    normalized_score=(float(sc) / max_score if max_score > 0 else 0.0),
+                    strategy="context_aware",
                 )
                 for i, (_p, doc, sc) in enumerate(baseline_results[:top_k])
             ]
 
-        from dvs.utils.graph_ops import mean_vector
-
         context_centroid: list[float] = mean_vector(seed_vectors)
-        if self.dvs.v(verbose):
-            logger.debug(
-                (
-                    f"[S5] seed_vecs(after_fetch)={len(seed_vectors)} "
-                    + f"centroid_dim={len(context_centroid)}"
-                )
-            )
-
-        # Query embedding (for vector similarity against candidates)
         query_vector: list[float] = await asyncio.to_thread(
             self.dvs.utils.embed_text, query
         )
 
-        # 2) Single-step graph expansion via entities (is_from)
-        #    Optionally respect max_expansion_steps>0; here we perform one step.
-        if max_expansion_steps <= 0:
-            max_expansion_steps = 1
-
+        # Step 3: Simple entity expansion via is_from
         entity_ids: set[str] = set()
         for doc_node in self.dvs.db.graph.nodes.retrieve_by_labels(
             seed_doc_ids, conn=conn, verbose=False
@@ -851,191 +798,101 @@ class Graph:
             neighbors = self.dvs.db.graph.utils.get_neighbors(
                 to_node_id_or_label=doc_node.node_id,
                 relation=RelationIsFrom,
-                limit=200,
+                limit=50,  # Simplified limit
                 conn=conn,
                 verbose=False,
             )
             for from_node, _edge, to_node in neighbors:
-                if from_node.kind == "entity":
+                if getattr(from_node, "kind", None) == "entity":
                     entity_ids.add(from_node.node_id)
-                if to_node.kind == "entity":
+                if getattr(to_node, "kind", None) == "entity":
                     entity_ids.add(to_node.node_id)
 
-        if self.dvs.v(verbose):
-            logger.debug(f"[S5] collected_entities={len(entity_ids)}")
-
-        # 2b) Expand via is_a/has_a, then hub suppression via related_to PR
-        expanded_entities5: set[str] = set(entity_ids)
-        expanded_entities5 = self.dvs.db.graph.utils.expand_is_a_bfs(
-            expanded_entities5,
-            is_a_max_hops,
-            is_a_limit_per_hop,
-            cap_total=None,
-            conn=conn,
-            verbose=False,
-        )
-        if has_a_enabled and expanded_entities5:
-            expanded_entities5 |= self.dvs.db.graph.utils.expand_has_a_one_hop(
-                expanded_entities5,
-                has_a_limit_per_entity,
-                cap_total=None,
-                conn=conn,
-                verbose=False,
-            )
-
-        if suppress_hubs and expanded_entities5:
-            before_hub5: int = len(expanded_entities5)
-            expanded_entities5 = self.dvs.db.graph.utils.suppress_hubs_by_pagerank(
-                expanded_entities5,
-                hub_pagerank_top_percent,
-                conn=conn,
-                relation=RelationRelatedTo,
-                limit=5000,
-            )
-            suppressed5: int = before_hub5 - len(expanded_entities5)
-            if self.dvs.v(verbose):
-                logger.info(
-                    (
-                        f"[S5] hub_suppressed={suppressed5} "
-                        f"entities_after={len(expanded_entities5)}"
-                    )
-                )
-
-        # 3) Collect candidate documents from these entities
+        # Step 4: Collect candidate documents (simplified - no complex expansion)
         candidate_doc_ids: set[str] = self.dvs.db.graph.utils.collect_docs_via_is_from(
-            expanded_entities5,
-            per_entity_limit=8,
-            cap_entities=300,
+            entity_ids,
+            per_entity_limit=5,  # Simplified limit
+            cap_entities=100,  # Simplified cap
             conn=conn,
             verbose=False,
         )
 
-        # Remove seeds from candidates
+        # Remove seed documents from candidates
         candidate_doc_ids.difference_update(set(seed_doc_ids))
 
-        if self.dvs.v(verbose):
-            logger.debug(
-                (
-                    f"[S5] candidate_docs={len(candidate_doc_ids)} "
-                    + "(after removing seeds)"
-                )
-            )
-            suppressed_val5: int = (
-                (before_hub5 - len(expanded_entities5))
-                if "before_hub5" in locals()
-                else 0
-            )
-            logger.info(
-                (
-                    f"[S5] seeds={len(entity_ids)} "
-                    f"entities_after={len(expanded_entities5)} "
-                    f"suppressed={suppressed_val5} "
-                    f"docs_collected={len(candidate_doc_ids)}"
-                )
-            )
-
         if not candidate_doc_ids:
-            # Fallback: return baseline wrapped
-            max_score: float = (
-                float(baseline_results[0][2]) if baseline_results else 1.0
-            )
-            if self.dvs.v(verbose):
-                logger.info(
-                    "[S5] No candidate docs from entities; fallback to baseline"
-                )
+            # Return baseline if no expansion possible
+            max_score = float(baseline_results[0][2]) if baseline_results else 1.0
             return [
                 GraphRAGResult(
                     document=doc,
                     score=float(sc),
                     vector_score=float(sc),
-                    graph_score=None,
+                    graph_score=0.0,
                     iterations=0,
                     rank=i + 1,
-                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                    normalized_score=(float(sc) / max_score if max_score > 0 else 0.0),
+                    strategy="context_aware",
                 )
                 for i, (_p, doc, sc) in enumerate(baseline_results[:top_k])
             ]
 
-        # Apply a hard cap to candidate docs to control latency
-        MAX_CANDIDATES: int = 200
-        if len(candidate_doc_ids) > MAX_CANDIDATES:
-            candidate_doc_ids = set(list(candidate_doc_ids)[:MAX_CANDIDATES])
-
-        # 4) Score candidates by query similarity and context similarity
-        alpha: float = 0.6  # weight for query-vs-candidate vector similarity
-        beta: float = 0.4  # weight for context-vs-candidate similarity
-
+        # Step 5: Dual similarity scoring with context filtering
         scored: list[tuple[Document, float, float, float]] = []
-        log_counter: int = 0
-        for doc_id in list(candidate_doc_ids)[:500]:
+        alpha: float = 0.6  # Query similarity weight
+        beta: float = 0.4  # Context similarity weight
+
+        for doc_id in list(candidate_doc_ids)[:200]:  # Cap candidates
             try:
-                # fewer points per doc for centroid to reduce DB calls
                 cand_centroid: list[float] = (
                     self.dvs.db.graph.utils.centroid_for_document(
                         doc_id, conn=conn, limit_points=3
                     )
                 )
+
                 if not cand_centroid:
-                    if self.dvs.v(verbose) and log_counter < 10:
-                        logger.debug(f"[S5] skip doc={doc_id} (no centroid)")
                     continue
+
                 vec_sim: float = float(cosine_similarity(query_vector, cand_centroid))
                 ctx_sim: float = float(
                     cosine_similarity(context_centroid, cand_centroid)
                 )
-                if ctx_sim < float(context_similarity_threshold):
-                    if self.dvs.v(verbose) and log_counter < 10:
-                        logger.debug(
-                            (
-                                f"[S5] drop doc={doc_id} vec={vec_sim:.3f} "
-                                + f"ctx={ctx_sim:.3f} "
-                                + f"th={context_similarity_threshold:.2f}"
-                            )
-                        )
-                        log_counter += 1
+
+                # Context threshold filter (CORE CONCEPT)
+                if ctx_sim < context_similarity_threshold:
                     continue
-                combined: float = alpha * vec_sim + beta * ctx_sim
+
+                combined_score: float = alpha * vec_sim + beta * ctx_sim
                 doc = self.dvs.db.documents.retrieve(doc_id, conn=conn, verbose=False)
-                scored.append((doc, combined, vec_sim, ctx_sim))
-                if self.dvs.v(verbose) and log_counter < 10:
-                    logger.debug(
-                        (
-                            f"[S5] keep doc={doc_id} vec={vec_sim:.3f} "
-                            + f"ctx={ctx_sim:.3f} combined={combined:.3f}"
-                        )
-                    )
-                    log_counter += 1
+                scored.append((doc, combined_score, vec_sim, ctx_sim))
+
             except Exception:
                 continue
 
+        # Fallback to baseline if no candidates pass threshold
         if not scored:
-            # Fallback: return baseline wrapped
-            max_score: float = (
-                float(baseline_results[0][2]) if baseline_results else 1.0
-            )
-            if self.dvs.v(verbose):
-                logger.info(
-                    "[S5] No candidates passed context threshold; fallback to baseline"
-                )
+            max_score = float(baseline_results[0][2]) if baseline_results else 1.0
             return [
                 GraphRAGResult(
                     document=doc,
                     score=float(sc),
                     vector_score=float(sc),
-                    graph_score=None,
+                    graph_score=0.0,
                     iterations=0,
                     rank=i + 1,
-                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                    normalized_score=(float(sc) / max_score if max_score > 0 else 0.0),
+                    strategy="context_aware",
                 )
                 for i, (_p, doc, sc) in enumerate(baseline_results[:top_k])
             ]
 
+        # Step 6: Rank and format results
         scored.sort(key=lambda x: x[1], reverse=True)
         top = scored[:top_k]
         max_score: float = float(top[0][1]) if top else 1.0
+
         out: list[GraphRAGResult] = []
         for idx, (doc, combined, vec_sim, ctx_sim) in enumerate(top, start=1):
-            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
             out.append(
                 GraphRAGResult(
                     document=doc,
@@ -1044,16 +901,18 @@ class Graph:
                     graph_score=float(ctx_sim),
                     iterations=1,
                     rank=idx,
-                    normalized_score=norm,
+                    normalized_score=(
+                        float(combined) / max_score if max_score > 0 else 0.0
+                    ),
+                    strategy="context_aware",
                 )
             )
 
-        # End timing and log performance
-        end_time = time.perf_counter()
-        duration_ms = (end_time - start_time) * 1000
+        # Simple performance logging
+        duration_ms = (time.perf_counter() - start_time) * 1000
         logger.info(
-            f"🔍 [Strategy 5: context_aware] Query: '{query[:50]}...' | "
-            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
+            f"🔍 [Context-Aware] Query processed | Top-k: {top_k} | "
+            f"Duration: {duration_ms:.3f} ms | Results: {len(out)}"
         )
 
         return out
@@ -1066,11 +925,12 @@ class Graph:
         conn: duckdb.DuckDBPyConnection | None = None,
         with_embedding: bool = True,
         strategy: typing.Literal[
+            "default",
             "vector_expansion",
             "graph_guided",
-            "hybrid_scoring",
             "iterative_refinement",
-        ] = "vector_expansion",
+            "context_aware",
+        ] = "default",
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
         """
