@@ -10,7 +10,6 @@ import duckdb
 from agents import OpenAIChatCompletionsModel, OpenAIResponsesModel
 
 import dvs
-import dvs.utils.vss as VSS
 from dvs.types.document import Document
 from dvs.types.edge import (
     RelationHasA,
@@ -20,7 +19,6 @@ from dvs.types.edge import (
 )
 from dvs.types.entity import Entity
 from dvs.types.graphrag_result import GraphRAGResult
-from dvs.types.node import Node as NodeType
 from dvs.types.point import Point
 from dvs.types.triplet import Triplet
 from dvs.utils.debug_print import debug_print
@@ -270,80 +268,45 @@ class Graph:
 
         conn = conn or self.dvs.new_connection()
 
-        # Step 1: Vector search to find seed documents
-        initial_results = await self.dvs.search(
-            query=query,
-            top_k=top_k * 2,
-            with_embedding=True,
-            conn=conn,
-            verbose=self.dvs.v(verbose),
+        # Use the shared vector expansion logic from utils
+        enhanced_results = (
+            await (
+                self.dvs.db.graph.utils.perform_vector_expansion_search(
+                    dvs=self.dvs,
+                    query=query,
+                    top_k=top_k,
+                    conn=conn,
+                    vector_weight=vector_weight,
+                    graph_weight=graph_weight,
+                    is_a_max_hops=is_a_max_hops,
+                    is_a_limit_per_hop=is_a_limit_per_hop,
+                    has_a_enabled=has_a_enabled,
+                    has_a_limit_per_entity=has_a_limit_per_entity,
+                    related_to_enabled=related_to_enabled,
+                    related_to_limit_per_entity=related_to_limit_per_entity,
+                    entity_expansion_cap=entity_expansion_cap,
+                    verbose=self.dvs.v(verbose),
+                )
+            )
         )
 
-        if not initial_results:
+        if not enhanced_results:
             return []
 
-        document_ids = [doc.document_id for _, doc, _ in initial_results]
-
-        # Step 2: Entity Discovery & Graph Expansion (CORE CONCEPT)
-        # Find entities connected to seed documents and expand through graph relations
-        related_entities: set[str] = set()
-        if document_ids:
-            related_entities = (
-                self.dvs.db.graph.utils.collect_entities_via_is_from_for_documents(
-                    document_ids, limit_per_doc=10, conn=conn, verbose=False
-                )
-            )
-
-        # Expand entities through multiple relation types for comprehensive coverage
-        expanded_entity_ids = (
-            self.dvs.db.graph.utils.expand_entities_with_multiple_relations(
-                related_entities,
-                is_a_max_hops=is_a_max_hops,
-                is_a_limit_per_hop=is_a_limit_per_hop,
-                has_a_enabled=has_a_enabled,
-                has_a_limit_per_entity=has_a_limit_per_entity,
-                related_to_enabled=related_to_enabled,
-                related_to_limit_per_entity=related_to_limit_per_entity,
-                suppress_hubs=False,  # Simplified version doesn't use hub suppression
-                entity_expansion_cap=entity_expansion_cap,
-                conn=conn,
-                verbose=False,
-            )
-        )
-
-        # Step 3: Scoring Algorithm - Combine vector and graph relevance
-        # Pre-cache all document nodes to avoid repeated database calls
-        doc_label_nodes: dict[str, "NodeType"] = {}
-        all_doc_ids = set(document_ids)  # Original seed documents
-
-        # Add current document IDs to cache
-        for doc_node in self.dvs.db.graph.nodes.retrieve_by_labels(
-            list(all_doc_ids), conn=conn, verbose=False
-        ):
-            if doc_node.node_id not in doc_label_nodes:
-                doc_label_nodes[doc_node.node_id] = doc_node
-
+        # Convert to format expected by final processing
         final_results: list[tuple[Document, float, float, float]] = []
-        for __point, doc, vec_score in initial_results:
-            try:
-                # Use expanded entities directly for graph relevance calculation
-                graph_score: float = self.dvs.db.graph.utils.calculate_graph_relevance(
-                    doc.document_id,
-                    document_ids,
-                    expanded_entity_ids,
-                    doc_label_nodes=doc_label_nodes,
-                    conn=conn,
-                    verbose=False,
+        for point, doc, combined_score in enhanced_results:
+            # For Strategy 1, we need to separate vector and graph scores
+            # We'll use the combined score as vector score and set graph score to 0
+            # since the private method already combines them
+            final_results.append(
+                (
+                    doc,
+                    combined_score,
+                    combined_score,
+                    0.0,  # vector_score = combined, graph_score = 0
                 )
-                # Weighted combination (CORE CONCEPT: weighted scoring)
-                combined_score: float = (
-                    vector_weight * float(vec_score) + graph_weight * graph_score
-                )
-                final_results.append(
-                    (doc, combined_score, float(vec_score), graph_score)
-                )
-            except Exception:
-                final_results.append((doc, float(vec_score), float(vec_score), 0.0))
+            )
 
         # Final Step: Rank and Format Results
         final_results.sort(key=lambda x: x[1], reverse=True)
@@ -551,254 +514,191 @@ class Graph:
         has_a_limit_per_entity: int = 3,
         suppress_hubs: bool = True,
         hub_pagerank_top_percent: float = 0.1,
+        entity_expansion_cap: int = 200,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 3: iterate expand → embed → search until gains are small.
-        LLM expands queries; graph adds new docs via entities; merge vectors and
-        re-search; stop on low improvement or max iterations.
-
-        Pros: escapes local minima; adapts via feedback; good for exploration.
-        Cons: multi-round latency; expander quality critical; tuning convergence.
-        Use when: batch/offline or higher-latency is fine; need high recall and
-        adaptive retrieval.
-
-        Diagram (Mermaid):
-        ```mermaid
-        flowchart TD
-            Q[Query] --> Embed0[Embed Base]
-            Embed0 --> VS0[Baseline Vector Search]
-            VS0 --> Loop{Improvement > threshold and iters < max?}
-            Loop -- Yes --> LLM[LLM Expand Queries]
-            LLM --> EmbedX[Embed Expansions]
-            VS0 --> Seeds[Best Docs]
-            Seeds --> Ent[Entities via is_from]
-            Ent -->|is_a/has_a| E[Expanded Entities]
-            E --> Docs[Collect Docs]
-            Docs --> GVecs[Graph Vectors]
-            Embed0 --> Cmp[Combine Vectors]
-            EmbedX --> Cmp
-            GVecs --> Cmp
-            Cmp --> VS1[Refined Vector Search]
-            VS1 --> Loop
-            Loop -- No --> Out[Best Results]
-        ```
         """
-        # Relation imports not needed; using Graph helpers for expansion/suppression
+        Strategy 3: Simplified Iterative Refinement
 
+        Core concept: Start with baseline search, then iteratively improve by:
+        1. Using LLM to expand queries
+        2. Using graph expansion to find related documents
+        3. Combining expanded information for better search
+        4. Stop when improvement becomes minimal
+
+        Reuses existing utilities from graph.utils and search strategies.
+        """
         # Start timing
         start_time = time.perf_counter()
 
         if query_expander is None:
             raise ValueError("query_expander must be provided for LLM-based expansion.")
 
-        # Step 0: Prepare baseline using original query
-        base_vector: list[float] = await asyncio.to_thread(
-            self.dvs.utils.embed_text, query
-        )
+        conn = conn or self.dvs.new_connection()
 
-        baseline_results = await VSS.vector_search(
-            vector=base_vector,
-            top_k=max(1, top_k),
-            embedding_dimensions=self.dvs.db_manifest.embedding_dimensions,
-            documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
-            points_table_name=dvs.DVS_POINTS_TABLE_NAME,
-            conn=conn or self.dvs.new_connection(read_only=True),
-            with_embedding=False,
-            debug=self.dvs.v(verbose),
-            console=self.dvs.settings.console,
+        # Step 1: Baseline search using enhanced vector expansion
+        baseline_results = (
+            await (
+                self.dvs.db.graph.utils.perform_vector_expansion_search(
+                    dvs=self.dvs,
+                    query=query,
+                    top_k=top_k,
+                    conn=conn,
+                    vector_weight=0.7,  # Use default weights for baseline
+                    graph_weight=0.3,
+                    is_a_max_hops=is_a_max_hops,
+                    is_a_limit_per_hop=is_a_limit_per_hop,
+                    has_a_enabled=has_a_enabled,
+                    has_a_limit_per_entity=has_a_limit_per_entity,
+                    related_to_enabled=True,  # Enable for baseline
+                    related_to_limit_per_entity=1,
+                    entity_expansion_cap=entity_expansion_cap,
+                    verbose=self.dvs.v(verbose),
+                )
+            )
         )
 
         if not baseline_results:
             return []
 
-        best_results: list[tuple[Point, Document, float]] = baseline_results
+        best_results = baseline_results
         best_top1: float = float(baseline_results[0][2])
-        current_vector: list[float] = list(base_vector)
         iterations: int = 0
 
         if self.dvs.v(verbose):
-            top_docs = ", ".join(
-                [
-                    doc.name
-                    for _, doc, _ in baseline_results[: min(3, len(baseline_results))]
-                ]
-            )
-            logger.info(
-                f"[gRAG_Iter] Baseline top1={best_top1:.3f}; top docs: {top_docs}"
-            )
+            logger.info(f"[Iterative] Baseline top1={best_top1:.3f}")
 
-        # Iterative loop
+        # Iterative refinement loop
         while iterations < max_iterations:
-            # 1) Expand query terms with LLM agent
+            # Step 2: LLM query expansion
             expanded_queries: list[str] = [
                 q
                 for q in (await query_expander(query))[:expansions_per_iter]
                 if isinstance(q, str) and q.strip()
             ]
+
             if not expanded_queries:
-                logger.info("[gRAG_Iter] No expanded queries returned; stopping.")
+                if self.dvs.v(verbose):
+                    logger.info("[Iterative] No expanded queries, stopping")
                 break
 
-            logger.debug(
-                f"[gRAG_Iter] Iter {iterations + 1} expansions: {expanded_queries}"
-            )
+            # Step 3: Graph-guided expansion (reuse existing utilities)
+            seed_doc_ids = [doc.document_id for _, doc, _ in best_results]
 
-            # 2) Embed expansions
-            expanded_vectors = await asyncio.to_thread(
-                self.dvs.utils.embed_texts, expanded_queries
-            )
-
-            # 2b) Graph-guided expansion (is_from 1-hop) to boost recall
-            seed_doc_ids: list[str] = [doc.document_id for _, doc, _ in best_results]
-            entity_ids: set[str] = (
+            # Get entities from current best documents
+            entity_ids = (
                 self.dvs.db.graph.utils.collect_entities_via_is_from_for_documents(
-                    seed_doc_ids, limit_per_doc=300, conn=conn, verbose=False
+                    seed_doc_ids,
+                    limit_per_doc=50,
+                    conn=conn,
+                    verbose=False,
                 )
             )
 
-            # Expand entities via is_a multi-hop, then has_a 1-hop
-            expanded_entities_iter: set[str] = self.dvs.db.graph.utils.expand_entities(
-                set(entity_ids),
+            # Expand entities using existing utility
+            expanded_entities = self.dvs.db.graph.utils.expand_entities(
+                entity_ids,
                 is_a_max_hops=is_a_max_hops,
                 is_a_limit_per_hop=is_a_limit_per_hop,
                 has_a_enabled=has_a_enabled,
                 has_a_limit_per_entity=has_a_limit_per_entity,
                 suppress_hubs=suppress_hubs,
                 hub_pagerank_top_percent=hub_pagerank_top_percent,
-                cap_total=None,
+                cap_total=200,
                 conn=conn,
                 verbose=False,
             )
 
-            # Expand to new documents (caps: 8 per entity, 150 total)
-            graph_doc_ids: set[str] = self.dvs.db.graph.utils.collect_docs_via_is_from(
-                expanded_entities_iter,
-                per_entity_limit=8,
-                cap_entities=150,
+            # Get new documents from expanded entities
+            graph_doc_ids = self.dvs.db.graph.utils.collect_docs_via_is_from(
+                expanded_entities,
+                per_entity_limit=5,
+                cap_entities=100,
                 conn=conn,
                 verbose=False,
             )
 
-            # Summary logging for S4
-            if self.dvs.v(verbose):
-                logger.info(
-                    (
-                        f"[S4] entities_seed={len(entity_ids)} "
-                        f"entities_after={len(expanded_entities_iter)} "
-                        f"docs_added={len(graph_doc_ids)}"
+            new_docs = graph_doc_ids.difference(set(seed_doc_ids))
+            if not new_docs:
+                if self.dvs.v(verbose):
+                    logger.info("[Iterative] No new documents from graph, stopping")
+                break
+
+            # Step 4: Combine information for improved search
+            # Use expanded queries with enhanced vector expansion
+            expanded_results: list[tuple[Point, Document, float]] = []
+            for exp_query in expanded_queries:
+                results = await self.dvs.db.graph.utils.perform_vector_expansion_search(
+                    dvs=self.dvs,
+                    query=exp_query,
+                    top_k=top_k,
+                    conn=conn,
+                    vector_weight=0.7,  # Use same weights as baseline
+                    graph_weight=0.3,
+                    is_a_max_hops=is_a_max_hops,
+                    is_a_limit_per_hop=is_a_limit_per_hop,
+                    has_a_enabled=has_a_enabled,
+                    has_a_limit_per_entity=has_a_limit_per_entity,
+                    related_to_enabled=True,
+                    related_to_limit_per_entity=1,
+                    entity_expansion_cap=entity_expansion_cap,
+                    verbose=False,
+                )
+                expanded_results.extend(results)
+
+            # Combine and deduplicate results
+            all_candidates = list(set(expanded_results + baseline_results))
+            if len(all_candidates) > top_k * 2:
+                all_candidates = all_candidates[: top_k * 2]
+
+            # Step 5: Check improvement
+            if all_candidates:
+                improved_top1 = float(all_candidates[0][2])
+                improvement = improved_top1 - best_top1
+
+                if improvement <= refinement_threshold:
+                    if self.dvs.v(verbose):
+                        logger.info(
+                            f"[Iterative] Improvement {improvement:.3f} < threshold, "
+                            "stopping",
+                        )
+                    break
+
+                # Accept improvement
+                best_results = all_candidates
+                best_top1 = improved_top1
+                iterations += 1
+
+                if self.dvs.v(verbose):
+                    logger.info(
+                        f"[Iterative] Iter {iterations}: improved to {best_top1:.3f}",
                     )
-                )
-
-            new_graph_docs = graph_doc_ids.difference(set(seed_doc_ids))
-            if len(new_graph_docs) == 0:
-                logger.info(
-                    "[gRAG_Iter] No new documents from graph expansion; stopping."
-                )
+            else:
                 break
 
-            # Build centroid from candidate document points
-            graph_vectors: list[list[float]] = []
-            pts = self.dvs.db.graph.utils.gather_points_for_documents(
-                list(new_graph_docs)[:150],
-                per_doc_limit=3,
-                with_embedding=True,
-                conn=conn,
-                verbose=False,
-            )
-            for pt in pts:
-                if pt.embedding:
-                    graph_vectors.append(pt.to_python())
-
-            # 3) Combine vectors (weighted average: base, LLM, graph)
-            has_llm = len(expanded_vectors) > 0
-            has_graph = len(graph_vectors) > 0
-            llm_w: float = 0.6 if has_llm else 0.0
-            graph_w: float = 0.4 if has_graph else 0.0
-            base_w: float = 1.0
-
-            def mean_at(i: int, vecs: list[list[float]]) -> float:
-                return sum(v[i] for v in vecs) / float(len(vecs)) if vecs else 0.0
-
-            denom: float = base_w + llm_w + graph_w
-            combined_vector: list[float] = []
-            for i in range(len(current_vector)):
-                val = (
-                    base_w * current_vector[i]
-                    + llm_w * mean_at(i, expanded_vectors)
-                    + graph_w * mean_at(i, graph_vectors)
-                ) / (denom if denom > 0 else 1.0)
-                combined_vector.append(val)
-
-            # 4) Re-search with refined vector
-            refined_results = await VSS.vector_search(
-                vector=combined_vector,
-                top_k=max(1, top_k),
-                embedding_dimensions=self.dvs.db_manifest.embedding_dimensions,
-                documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
-                points_table_name=dvs.DVS_POINTS_TABLE_NAME,
-                conn=conn or self.dvs.new_connection(read_only=True),
-                with_embedding=False,
-                debug=self.dvs.v(verbose),
-                console=self.dvs.settings.console,
-            )
-
-            if not refined_results:
-                logger.info("[gRAG_Iter] Refined search returned no results; stopping.")
-                break
-
-            refined_top1: float = float(refined_results[0][2])
-            improvement: float = refined_top1 - best_top1
-
-            top_docs_refined = ", ".join(
-                [
-                    doc.name
-                    for _, doc, _ in refined_results[: min(3, len(refined_results))]
-                ]
-            )
-            logger.debug(
-                (
-                    f"[gRAG_Iter] Iter {iterations + 1} top1={refined_top1:.3f} "
-                    + f"improve={improvement:.3f}; top docs: {top_docs_refined}"
-                )
-            )
-
-            # 5) Check convergence using top-1 score improvement
-            if improvement <= refinement_threshold:
-                logger.info(
-                    (
-                        f"[gRAG_Iter] Stop: improvement {improvement:.3f} "
-                        + f"<= threshold {refinement_threshold:.3f}."
-                    )
-                )
-                break
-
-            # 6) Accept refinement and continue
-            best_results = refined_results
-            best_top1 = refined_top1
-            current_vector = combined_vector
-            iterations += 1
-
-            logger.info(
-                f"[gRAG_Iter] Accept iter {iterations}; new best_top1={best_top1:.3f}"
-            )
-
-        # Build GraphRAGResult output
-        output: list[GraphRAGResult] = [
+        # Step 6: Format final results
+        final_results = best_results[:top_k]
+        output = [
             GraphRAGResult(
                 document=doc,
                 score=float(score),
                 vector_score=float(score),
                 graph_score=None,
                 iterations=iterations,
+                rank=i + 1,
+                normalized_score=(
+                    float(score) / float(final_results[0][2]) if final_results else 0.0
+                ),
+                strategy="iterative_refinement",
             )
-            for (_point, doc, score) in best_results[:top_k]
+            for i, (_point, doc, score) in enumerate(final_results)
         ]
 
         # End timing and log performance
         end_time = time.perf_counter()
         duration_ms = (end_time - start_time) * 1000
         logger.info(
-            f"🔍 [Strategy 4: iterative_refinement] Query: '{query[:50]}...' | "
+            f"🔍 [Strategy 3: iterative_refinement] Query: '{query[:50]}...' | "
             f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | "
             f"Results: {len(output)} | Iterations: {iterations}"
         )

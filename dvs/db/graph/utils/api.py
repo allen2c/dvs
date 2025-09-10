@@ -843,3 +843,115 @@ class Utils:
             return 1.0
         else:
             return max(0.1, 1.0 / (min_distance + 1))
+
+    async def perform_vector_expansion_search(
+        self,
+        dvs: "dvs.DVS",
+        query: str,
+        top_k: int,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        vector_weight: float = 0.7,
+        graph_weight: float = 0.3,
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        related_to_enabled: bool = True,
+        related_to_limit_per_entity: int = 1,
+        entity_expansion_cap: int = 200,
+        verbose: bool | None = None,
+    ) -> list[tuple["Point", "Document", float]]:
+        """
+        Core vector expansion logic for GraphRAG search strategies.
+
+        Performs vector search, entity discovery, graph expansion, and
+        weighted scoring combination. Used as a building block for
+        various search strategies.
+
+        Args:
+            dvs: DVS instance for database access and utilities
+            query: Search query string
+            top_k: Number of top results to return
+            conn: Database connection (optional)
+            vector_weight: Weight for vector similarity in scoring (0.0-1.0)
+            graph_weight: Weight for graph relevance in scoring (0.0-1.0)
+            is_a_max_hops: Maximum hops for is_a expansion
+            is_a_limit_per_hop: Limit per hop for is_a expansion
+            has_a_enabled: Whether to enable has_a expansion
+            has_a_limit_per_entity: Limit per entity for has_a expansion
+            related_to_enabled: Whether to enable related_to expansion
+            related_to_limit_per_entity: Limit per entity for related_to expansion
+            entity_expansion_cap: Maximum entities to expand to
+            verbose: Verbosity flag
+
+        Returns:
+            List of tuples: (Point, Document, combined_score)
+        """
+        conn = conn or dvs.new_connection()
+
+        # Vector search to find seed documents
+        initial_results = await dvs.search(
+            query=query,
+            top_k=top_k * 2,
+            with_embedding=True,
+            conn=conn,
+            verbose=dvs.v(verbose),
+        )
+
+        if not initial_results:
+            return []
+
+        document_ids = [doc.document_id for _, doc, _ in initial_results]
+
+        # Entity discovery & graph expansion
+        related_entities: set[str] = set()
+        if document_ids:
+            related_entities = self.collect_entities_via_is_from_for_documents(
+                document_ids, limit_per_doc=10, conn=conn, verbose=False
+            )
+
+        # Expand entities through multiple relations
+        expanded_entity_ids = self.expand_entities_with_multiple_relations(
+            related_entities,
+            is_a_max_hops=is_a_max_hops,
+            is_a_limit_per_hop=is_a_limit_per_hop,
+            has_a_enabled=has_a_enabled,
+            has_a_limit_per_entity=has_a_limit_per_entity,
+            related_to_enabled=related_to_enabled,
+            related_to_limit_per_entity=related_to_limit_per_entity,
+            suppress_hubs=False,
+            entity_expansion_cap=entity_expansion_cap,
+            conn=conn,
+            verbose=verbose,
+        )
+
+        # Cache document nodes
+        doc_label_nodes: dict[str, "NodeType"] = {}
+        all_doc_ids = set(document_ids)
+        for doc_node in dvs.db.graph.nodes.retrieve_by_labels(
+            list(all_doc_ids), conn=conn, verbose=False
+        ):
+            if doc_node.node_id not in doc_label_nodes:
+                doc_label_nodes[doc_node.node_id] = doc_node
+
+        # Calculate combined scores
+        enhanced_results: list[tuple["Point", "Document", float]] = []
+        for point, doc, vec_score in initial_results:
+            try:
+                graph_score: float = self.calculate_graph_relevance(
+                    doc.document_id,
+                    document_ids,
+                    expanded_entity_ids,
+                    doc_label_nodes=doc_label_nodes,
+                    conn=conn,
+                    verbose=False,
+                )
+                combined_score: float = (
+                    vector_weight * float(vec_score) + graph_weight * graph_score
+                )
+                enhanced_results.append((point, doc, combined_score))
+            except Exception:
+                enhanced_results.append((point, doc, float(vec_score)))
+
+        return enhanced_results
