@@ -761,25 +761,22 @@ class Graph:
     ) -> set[str]:
         """Collect entities connected to documents via is_from edges."""
         entity_ids: set[str] = set()
-        for doc_id in document_ids:
-            try:
-                doc_node = self.nodes.retrieve_by_label(
-                    doc_id, conn=conn, verbose=self.dvs.v(verbose)
-                )
-                neighbors = self.get_neighbors(
-                    to_node_id_or_label=doc_node.node_id,
-                    relation=RelationIsFrom,
-                    limit=limit_per_doc,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
-                )
-                for from_node, _edge, to_node in neighbors:
-                    if getattr(from_node, "kind", None) == "entity":
-                        entity_ids.add(from_node.node_id)
-                    if getattr(to_node, "kind", None) == "entity":
-                        entity_ids.add(to_node.node_id)
-            except Exception:
-                continue
+        for doc_node in self.dvs.db.graph.nodes.retrieve_by_labels(
+            document_ids, conn=conn, verbose=self.dvs.v(verbose)
+        ):
+            neighbors = self.get_neighbors(
+                to_node_id_or_label=doc_node.node_id,
+                relation=RelationIsFrom,
+                limit=limit_per_doc,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
+            )
+            for from_node, _edge, to_node in neighbors:
+                if getattr(from_node, "kind", None) == "entity":
+                    entity_ids.add(from_node.node_id)
+                if getattr(to_node, "kind", None) == "entity":
+                    entity_ids.add(to_node.node_id)
+
         return entity_ids
 
     def gather_points_for_documents(
@@ -1054,14 +1051,11 @@ class Graph:
         all_doc_ids = set(document_ids)  # Original seed documents
 
         # Add current document IDs to cache
-        for doc_id in all_doc_ids:
-            try:
-                if doc_id not in doc_label_nodes:
-                    doc_label_nodes[doc_id] = self.dvs.db.graph.nodes.retrieve_by_label(
-                        doc_id, conn=conn, verbose=False
-                    )
-            except Exception:
-                continue
+        for doc_node in self.dvs.db.graph.nodes.retrieve_by_labels(
+            list(all_doc_ids), conn=conn, verbose=False
+        ):
+            if doc_node.node_id not in doc_label_nodes:
+                doc_label_nodes[doc_node.node_id] = doc_node
 
         final_results: list[tuple[Document, float, float, float]] = []
         for __point, doc, vec_score in initial_results:
@@ -1456,7 +1450,7 @@ class Graph:
                     try:
                         # Check if this document is related to the important entity
                         # Match by document label, not node_id
-                        doc_node = self.dvs.db.graph.nodes.retrieve_by_label(
+                        doc_node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
                             doc.document_id, conn=conn, verbose=False
                         )
                         neighbors = self.dvs.db.graph.get_neighbors(
@@ -2083,25 +2077,21 @@ class Graph:
             max_expansion_steps = 1
 
         entity_ids: set[str] = set()
-        for _pt, doc, _ in baseline_results:
-            try:
-                doc_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                    doc.document_id, conn=conn, verbose=False
-                )
-                neighbors = self.dvs.db.graph.get_neighbors(
-                    to_node_id_or_label=doc_node.node_id,
-                    relation=RelationIsFrom,
-                    limit=200,
-                    conn=conn,
-                    verbose=False,
-                )
-                for from_node, _edge, to_node in neighbors:
-                    if from_node.kind == "entity":
-                        entity_ids.add(from_node.node_id)
-                    if to_node.kind == "entity":
-                        entity_ids.add(to_node.node_id)
-            except Exception:
-                continue
+        for doc_node in self.dvs.db.graph.nodes.retrieve_by_labels(
+            seed_doc_ids, conn=conn, verbose=False
+        ):
+            neighbors = self.dvs.db.graph.get_neighbors(
+                to_node_id_or_label=doc_node.node_id,
+                relation=RelationIsFrom,
+                limit=200,
+                conn=conn,
+                verbose=False,
+            )
+            for from_node, _edge, to_node in neighbors:
+                if from_node.kind == "entity":
+                    entity_ids.add(from_node.node_id)
+                if to_node.kind == "entity":
+                    entity_ids.add(to_node.node_id)
 
         if self.dvs.v(verbose):
             logger.debug(f"[S5] collected_entities={len(entity_ids)}")
@@ -2387,7 +2377,7 @@ class Graph:
             if target_doc_id in doc_label_nodes:
                 target_node = doc_label_nodes[target_doc_id]
             else:
-                target_node = self.dvs.db.graph.nodes.retrieve_by_label(
+                target_node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
                     target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
                 )
                 doc_label_nodes[target_doc_id] = target_node
@@ -2563,7 +2553,7 @@ class Graph:
             if target_doc_id in doc_label_nodes:
                 target_node = doc_label_nodes[target_doc_id]
             else:
-                target_node = self.dvs.db.graph.nodes.retrieve_by_label(
+                target_node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
                     target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
                 )
                 doc_label_nodes[target_doc_id] = target_node
@@ -2574,8 +2564,10 @@ class Graph:
                     if original_doc_id in doc_label_nodes:
                         original_node = doc_label_nodes[original_doc_id]
                     else:
-                        original_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                            original_doc_id, conn=conn, verbose=False
+                        original_node = (
+                            self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
+                                original_doc_id, conn=conn, verbose=False
+                            )
                         )
                         doc_label_nodes[original_doc_id] = original_node
 

@@ -90,7 +90,7 @@ class Nodes:
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
-    ) -> NodeType:
+    ) -> NodeType | None:
         query = textwrap.dedent(
             f"""
             SELECT {self.columns_expr}
@@ -113,15 +113,27 @@ class Nodes:
         )
 
         if result is None:
+            return None
+
+        data = dict(zip(self.columns, result))
+        node = NodeType.model_validate(data)
+
+        return node
+
+    def retrieve_or_raise(
+        self,
+        node_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> NodeType:
+        node = self.retrieve(node_id, conn=conn, verbose=verbose)
+        if node is None:
             raise openai.NotFoundError(
                 f"Node with ID '{node_id}' not found.",
                 response=dummy_httpx_response(404, b"Not Found"),
                 body=None,
             )
-
-        data = dict(zip(self.columns, result))
-        node = NodeType.model_validate(data)
-
         return node
 
     def retrieve_by_label(
@@ -130,7 +142,7 @@ class Nodes:
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
-    ) -> NodeType:
+    ) -> NodeType | None:
         query = textwrap.dedent(
             f"""
             SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME} WHERE label = ?
@@ -151,15 +163,27 @@ class Nodes:
         )
 
         if result is None:
+            return None
+
+        data = dict(zip(self.columns, result))
+        node = NodeType.model_validate(data)
+
+        return node
+
+    def retrieve_by_label_or_raise(
+        self,
+        label: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> NodeType:
+        node = self.retrieve_by_label(label, conn=conn, verbose=verbose)
+        if node is None:
             raise openai.NotFoundError(
                 f"Node with label '{label}' not found.",
                 response=dummy_httpx_response(404, b"Not Found"),
                 body=None,
             )
-
-        data = dict(zip(self.columns, result))
-        node = NodeType.model_validate(data)
-
         return node
 
     def create(
@@ -175,6 +199,35 @@ class Nodes:
             verbose=self.dvs.v(verbose),
         )
         return nodes[0]
+
+    def retrieve_by_labels(
+        self,
+        labels: typing.List[typing.Text],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> typing.List[NodeType]:
+        placeholders = ", ".join(["?" for _ in labels])
+        query = textwrap.dedent(
+            f"""
+            SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME}
+            WHERE label IN ({placeholders})
+            """
+        ).strip()
+        parameters = tuple(labels)
+
+        with Timer() as timer:
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchall()
+            result_dicts = [dict(zip(self.columns, row)) for row in result]
+
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Retrieving nodes with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return [NodeType.model_validate(row) for row in result_dicts]
 
     def bulk_create(
         self,
