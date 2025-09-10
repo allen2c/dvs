@@ -380,346 +380,101 @@ class Graph:
         top_k: int = 3,
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
-        relation_types: list[str] | None = None,
-        centrality_threshold: float = 0.5,
         vector_weight: float = 0.6,
         graph_weight: float = 0.4,
-        with_embedding: bool = False,
-        # Expansion and hub controls
-        is_a_max_hops: int = 3,
-        is_a_limit_per_hop: int = 20,
-        has_a_enabled: bool = True,
-        has_a_limit_per_entity: int = 3,
-        related_to_limit_per_entity: int = 1,
-        suppress_hubs: bool = True,
-        hub_pagerank_top_percent: float = 0.1,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 2: PageRank-guided vector search over salient entities.
-        Select high-centrality entities, expand lightly, collect related docs,
-        then combine vector similarity with graph importance for ranking.
-
-        Pros: robust for ambiguous queries; targets globally important graph areas.
-        Cons: depends on centrality quality; may miss niche items; algo overhead.
-        Use when: graph is rich and centrality is meaningful; discovery-oriented
-        retrieval benefits from salient-node guidance.
-
-        Diagram (Mermaid):
-        ```mermaid
-        flowchart TD
-            Q[Query] --> PR[PageRank RelatedTo]
-            PR --> Important[Select Important Entities]
-            Important -->|is_a BFS| E1[Expanded Entities]
-            E1 -->|has_a 1-hop| E2[Expanded Entities]
-            E2 --> Docs[Collect Docs via is_from]
-            Docs --> Cand[Candidate Points]
-            Q --> Embed[Embed Query]
-            Cand --> VSim[Vector Similarity]
-            Important --> GImp[Graph Importance]
-            VSim --> Combine[Weighted Sum]
-            GImp --> Combine
-            Combine --> TopK[Top-k Results]
-        ```
         """
-        # no direct Relation import needed; using existing helpers
+        Simplified Strategy 2: PageRank-guided vector search.
+
+        Core algorithm flow:
+        Step 1: PageRank to find important nodes (CORE)
+        Step 2: Entity expansion through graph relations
+        Step 3: Collect documents and prepare candidates
+        Step 4: Calculate combined scores and return results
+
+        Core concept: Use graph importance (PageRank) to guide vector search direction
+        instead of searching all documents blindly.
+        """
+
         from dvs.utils.cosine_similarity import cosine_similarity
 
         conn = conn or self.dvs.new_connection()
 
-        # Start timing
-        start_time = time.perf_counter()
-
-        # Step 1: Find important nodes using PageRank
-        logger.debug("📊 Step 1: Finding important nodes using PageRank...")
-
-        # Use PageRank to identify central nodes in the graph
-        relation_type = RelationRelatedTo
-        if relation_types:
-            # Map string to proper RelationType
-            relation_map = {
-                "is_a": "is_a",
-                "has_a": "has_a",
-                "related_to": "related_to",
-                "is_from": "is_from",
-            }
-            if relation_types[0] in relation_map:
-                relation_type = relation_types[0]  # type: ignore
-
+        # Step 1: Find important nodes using PageRank (CORE CONCEPT)
         pagerank_results = self.dvs.db.graph.algorithm.pagerank(
-            relation=relation_type,  # type: ignore
-            limit=top_k * 10,  # Get more candidates for filtering
+            relation=RelationRelatedTo,
+            limit=top_k * 5,  # Simplified: fewer candidates
             conn=conn,
             verbose=self.dvs.v(verbose),
         )
 
         if not pagerank_results:
-            logger.warning(
-                "⚠️ No PageRank results found, falling back to regular search"
-            )
-            base = await self.dvs.search(
-                query,
-                top_k=top_k,
-                with_embedding=with_embedding,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
-            max_score: float = float(base[0][2]) if base else 1.0
-            return [
-                GraphRAGResult(
-                    document=doc,
-                    score=float(sc),
-                    vector_score=float(sc),
-                    graph_score=0.0,
-                    iterations=None,
-                    rank=i + 1,
-                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
-                    strategy="graph_guided",
-                )
-                for i, (_p, doc, sc) in enumerate(base)
-            ]
+            logger.warning("⚠️ No PageRank results found, returning empty results")
+            return []
 
-        # Filter to get high-centrality nodes above threshold
-        important_nodes = []
-        max_pagerank = (
-            max(score for _, score in pagerank_results) if pagerank_results else 1.0
+        # Step 2: Entity Discovery & Graph Expansion
+        important_nodes = [(node_id, score) for node_id, score in pagerank_results]
+        seed_entities: set[str] = {nid for (nid, _score) in important_nodes}
+
+        # Use existing utils method for entity expansion (simplified)
+        expanded_entities = self.dvs.db.graph.utils.expand_entities(
+            seed_entities,
+            is_a_max_hops=2,  # Fixed 2 hops for is_a
+            is_a_limit_per_hop=10,  # Simplified limit
+            has_a_enabled=True,
+            has_a_limit_per_entity=5,  # Simplified limit
+            suppress_hubs=False,  # Keep simple, no hub suppression
+            cap_total=300,  # Reasonable cap to prevent explosion
+            conn=conn,
+            verbose=self.dvs.v(verbose),
         )
 
-        for node_id, pagerank_score in pagerank_results:
-            # Normalize score and filter by centrality threshold
-            normalized_score = pagerank_score / max_pagerank if max_pagerank > 0 else 0
-            if normalized_score >= centrality_threshold:
-                important_nodes.append((node_id, normalized_score))
-
-        if not important_nodes:
-            logger.warning(
-                "⚠️ No nodes above centrality threshold, using top-ranked nodes"
-            )
-            # Fallback: use top nodes regardless of threshold
-            important_nodes = [
-                (node_id, score / max_pagerank)
-                for node_id, score in pagerank_results[: top_k * 3]
-            ]
-
-        logger.info(
-            f"✅ Found {len(important_nodes)} important nodes for vector search"
+        # Step 3: Collect documents and prepare candidates
+        related_documents = self.dvs.db.graph.utils.collect_docs_via_is_from(
+            expanded_entities,
+            per_entity_limit=3,
+            cap_entities=200,
+            conn=conn,
+            verbose=False,
         )
-
-        # Step 2: Get documents related to these important nodes
-        logger.debug("🔍 Step 2: Performing vector search on important nodes...")
-        # Expand entities: is_a multi-hop and has_a 1-hop
-        expanded_entities: set[str] = {nid for (nid, _score) in important_nodes}
-
-        # is_a BFS both directions
-        if is_a_max_hops > 0:
-            frontier: set[str] = set(expanded_entities)
-            visited: set[str] = set(expanded_entities)
-            for _ in range(is_a_max_hops):
-                if not frontier:
-                    break
-                next_frontier: set[str] = set()
-                for eid in list(frontier):
-                    try:
-                        outs = self.dvs.db.graph.utils.get_neighbors(
-                            from_node_id_or_label=eid,
-                            relation=RelationIsA,
-                            limit=is_a_limit_per_hop,
-                            conn=conn,
-                            verbose=False,
-                        )
-                    except Exception:
-                        outs = []
-                    try:
-                        ins = self.dvs.db.graph.utils.get_neighbors(
-                            to_node_id_or_label=eid,
-                            relation=RelationIsA,
-                            limit=is_a_limit_per_hop,
-                            conn=conn,
-                            verbose=False,
-                        )
-                    except Exception:
-                        ins = []
-                    for fn, _e, tn in list(outs) + list(ins):
-                        other = tn if fn.node_id == eid else fn
-                        if getattr(other, "kind", None) == "entity":
-                            oid: str = other.node_id
-                            if oid not in visited:
-                                visited.add(oid)
-                                expanded_entities.add(oid)
-                                next_frontier.add(oid)
-                frontier = next_frontier
-
-        # has_a 1-hop both directions
-        if has_a_enabled and expanded_entities:
-            seeds: list[str] = list(expanded_entities)[:500]
-            for eid in seeds:
-                try:
-                    outs = self.dvs.db.graph.utils.get_neighbors(
-                        from_node_id_or_label=eid,
-                        relation=RelationHasA,
-                        limit=has_a_limit_per_entity,
-                        conn=conn,
-                        verbose=False,
-                    )
-                except Exception:
-                    outs = []
-                try:
-                    ins = self.dvs.db.graph.utils.get_neighbors(
-                        to_node_id_or_label=eid,
-                        relation=RelationHasA,
-                        limit=has_a_limit_per_entity,
-                        conn=conn,
-                        verbose=False,
-                    )
-                except Exception:
-                    ins = []
-                for fn, _e, tn in list(outs) + list(ins):
-                    other = tn if fn.node_id == eid else fn
-                    if getattr(other, "kind", None) == "entity":
-                        expanded_entities.add(other.node_id)
-
-        # Hub suppression on expanded entities
-        if suppress_hubs and expanded_entities:
-            try:
-                expanded_entities = self.dvs.db.graph.utils.suppress_hubs_by_pagerank(
-                    expanded_entities,
-                    hub_pagerank_top_percent,
-                    conn=conn,
-                    relation=RelationRelatedTo,
-                    limit=5000,
-                )
-            except Exception:
-                pass
-
-        # Collect documents from expanded entities via is_from
-        related_documents = set()
-        for node_id in list(expanded_entities)[:1000]:
-            try:
-                neighbors = self.dvs.db.graph.utils.get_neighbors(
-                    from_node_id_or_label=node_id,
-                    relation=RelationIsFrom,
-                    limit=5,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
-                )
-                for _, _, doc_node in neighbors:
-                    if doc_node.kind == "document":
-                        related_documents.add(doc_node.label)
-            except Exception as e:
-                logger.error(f"⚠️ Error getting neighbors for node {node_id}: {e}")
-                continue
-
-        # Summary logging (standardized)
-        seeds_count_s2: int = len({nid for (nid, _sc) in important_nodes})
-        entities_count_s2: int = len(expanded_entities)
-        docs_count_s2: int = len(related_documents)
-        suppressed_count_s2: int = 0
-        if self.dvs.v(verbose):
-            logger.info(
-                (
-                    f"[S2] seeds={seeds_count_s2} "
-                    f"entities_after={entities_count_s2} "
-                    f"suppressed={suppressed_count_s2} "
-                    f"docs_collected={docs_count_s2}"
-                )
-            )
 
         if not related_documents:
-            logger.warning(
-                "⚠️ No related documents found, falling back to regular search"
-            )
-            base = await self.dvs.search(
-                query,
-                top_k=top_k,
-                with_embedding=with_embedding,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
-            max_score: float = float(base[0][2]) if base else 1.0
-            return [
-                GraphRAGResult(
-                    document=doc,
-                    score=float(sc),
-                    vector_score=float(sc),
-                    graph_score=0.0,
-                    iterations=None,
-                    rank=i + 1,
-                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
-                    strategy="graph_guided",
-                )
-                for i, (_p, doc, sc) in enumerate(base)
-            ]
+            logger.warning("⚠️ No related documents found, returning empty results")
+            return []
 
-        # Step 3: Vector search on the collected documents
-        logger.debug(
-            f"📈 Step 3: Vector search on {len(related_documents)} documents..."
-        )
-
-        # Get all points for the related documents
-        candidate_points: list["Point"] = (
-            self.dvs.db.graph.utils.gather_points_for_documents(
-                list(related_documents)[:50],
-                per_doc_limit=10,
-                with_embedding=True,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
+        candidate_points = self.dvs.db.graph.utils.gather_points_for_documents(
+            list(related_documents)[:30],
+            per_doc_limit=5,
+            with_embedding=True,
+            conn=conn,
+            verbose=self.dvs.v(verbose),
         )
 
         if not candidate_points:
-            logger.warning(
-                "⚠️ No candidate points found, falling back to regular search"
-            )
-            base = await self.dvs.search(
-                query,
-                top_k=top_k,
-                with_embedding=with_embedding,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
-            max_score: float = float(base[0][2]) if base else 1.0
-            return [
-                GraphRAGResult(
-                    document=doc,
-                    score=float(sc),
-                    vector_score=float(sc),
-                    graph_score=0.0,
-                    iterations=None,
-                    rank=i + 1,
-                    normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
-                    strategy="graph_guided",
-                )
-                for i, (_p, doc, sc) in enumerate(base)
-            ]
+            logger.warning("⚠️ No candidate points found, returning empty results")
+            return []
 
-        # Step 4: Calculate vector similarities and combine with graph scores
-        logger.debug("⚖️ Step 4: Calculating combined scores...")
+        # Step 4: Calculate combined scores
+        query_vector = await asyncio.to_thread(self.dvs.utils.embed_text, query)
 
-        # Get query embedding
-        query_vector: list[float] = await asyncio.to_thread(
-            self.dvs.utils.embed_text, query
-        )
-
-        scored_candidates: list[tuple[Point, Document, float, float]] = []
+        scored_candidates = []
         for point in candidate_points:
             try:
                 if not point.embedding:
-                    raise ValueError("Point has no embedding")
                     continue
 
                 point_vector = point.to_python()
                 vector_similarity = cosine_similarity(query_vector, point_vector)
 
-                # Find the document this point belongs to
                 doc = self.dvs.db.documents.retrieve(
                     point.document_id, conn=conn, verbose=False
                 )
 
-                # Get graph importance score for this document's related entities
+                # Graph importance from PageRank scores
                 graph_importance = 0.0
                 for node_id, node_score in important_nodes:
                     try:
-                        # Check if this document is related to the important entity
-                        # Match by document label, not node_id
                         doc_node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
                             doc.document_id, conn=conn, verbose=False
                         )
@@ -736,8 +491,7 @@ class Graph:
                     except Exception:
                         continue
 
-                # Combined score: weighted average of vector similarity
-                # and graph importance
+                # Weighted combination (CORE CONCEPT)
                 combined_score = (
                     vector_weight * vector_similarity + graph_weight * graph_importance
                 )
@@ -746,43 +500,35 @@ class Graph:
                     (point, doc, combined_score, vector_similarity)
                 )
 
-            except Exception as e:
-                logger.error(f"⚠️ Error processing point {point.point_id}: {e}")
+            except Exception:
                 continue
 
-        # Step 5: Return top-k results
+        # Final Step: Rank and format results
         scored_candidates.sort(key=lambda x: x[2], reverse=True)
-
-        logger.info(
-            f"✅ Graph-Guided Vector Search completed. "
-            f"Found {len(scored_candidates)} candidates."
-        )
-
         top = scored_candidates[:top_k]
-        max_score: float = float(top[0][2]) if top else 1.0
-        out: list[GraphRAGResult] = []
+
+        out = []
+        max_score = float(top[0][2]) if top else 1.0
         for idx, (_p, doc, combined, vsc) in enumerate(top, start=1):
-            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
             out.append(
                 GraphRAGResult(
                     document=doc,
                     score=float(combined),
                     vector_score=float(vsc),
-                    graph_score=None,
+                    graph_score=0.0,  # Simplified: no graph score tracking
                     iterations=None,
                     rank=idx,
-                    normalized_score=norm,
+                    normalized_score=(
+                        float(combined) / max_score if max_score > 0 else 0.0
+                    ),
                     strategy="graph_guided",
                 )
             )
 
-        # End timing and log performance
-        end_time = time.perf_counter()
-        duration_ms = (end_time - start_time) * 1000
-        logger.info(
-            f"🔍 [Strategy 2: graph_guided] Query: '{query[:50]}...' | "
-            f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
-        )
+        if self.dvs.v(verbose):
+            logger.info(
+                f"🔍 [Simplified Strategy 2] Query processed, found {len(out)} results"
+            )
 
         return out
 
@@ -1567,5 +1313,59 @@ class Graph:
             f"🔍 [Strategy 5: context_aware] Query: '{query[:50]}...' | "
             f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | Results: {len(out)}"
         )
+
+        return out
+
+    async def search_default(
+        self,
+        query: str,
+        top_k: int = 3,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        with_embedding: bool = True,
+        strategy: typing.Literal[
+            "vector_expansion",
+            "graph_guided",
+            "hybrid_scoring",
+            "iterative_refinement",
+        ] = "vector_expansion",
+        verbose: bool | None = None,
+    ) -> list[GraphRAGResult]:
+        """
+        Default fallback search strategy using basic vector search.
+
+        This method provides a standardized fallback when graph-based strategies
+        cannot find sufficient results.
+        """
+        conn = conn or self.dvs.new_connection()
+
+        # Basic vector search
+        base = await self.dvs.search(
+            query=query,
+            top_k=top_k,
+            with_embedding=with_embedding,
+            conn=conn,
+            verbose=self.dvs.v(verbose),
+        )
+
+        max_score = float(base[0][2]) if base else 1.0
+        out = [
+            GraphRAGResult(
+                document=doc,
+                score=float(sc),
+                vector_score=float(sc),
+                graph_score=0.0,
+                iterations=None,
+                rank=i + 1,
+                normalized_score=(float(sc) / max_score) if max_score > 0 else 0.0,
+                strategy=strategy,
+            )
+            for i, (_p, doc, sc) in enumerate(base)
+        ]
+
+        if self.dvs.v(verbose):
+            logger.info(
+                f"🔍 [Default Fallback] Query processed, found {len(out)} results"
+            )
 
         return out
