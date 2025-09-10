@@ -106,7 +106,6 @@ async def main():
 
     # Parameters for fairness
     topk: int = 3
-    graph_depth: int = 1
     vec_w: float = 0.7
     graph_w: float = 0.3
     centrality_th: float = 0.5
@@ -129,7 +128,6 @@ async def main():
         s1 = await dvs_client.db.graph.search_vector_expansion(
             query,
             top_k=topk,
-            graph_expansion_depth=graph_depth,
             vector_weight=vec_w,
             graph_weight=graph_w,
             verbose=VERBOSE,

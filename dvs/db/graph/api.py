@@ -981,65 +981,41 @@ class Graph:
         top_k: int = 3,
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
-        graph_expansion_depth: int = 1,
         vector_weight: float = 0.7,
         graph_weight: float = 0.3,
-        with_embedding: bool = False,
         is_a_max_hops: int = 3,
         is_a_limit_per_hop: int = 20,
         has_a_enabled: bool = True,
         has_a_limit_per_entity: int = 3,
         related_to_enabled: bool = True,
         related_to_limit_per_entity: int = 1,
-        docs_per_entity_limit: int = 3,
         entity_expansion_cap: int = 200,
-        suppress_hubs: bool = True,
-        hub_pagerank_top_percent: float = 0.1,
-        related_to_require_seed_touch: bool = True,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
-        """Strategy 1: vector search → graph expand → re-score (vector+graph).
-        Expand seed entities via is_from, is_a, has_a (and optional related_to),
-        collect more docs, then combine vector and graph relevance for ranking.
+        """
+        Simplified Strategy 1: Vector → Entity Discovery → Scoring → Results
 
-        Pros: simple; leverages entities near seed docs; explainable via edges.
-        Cons: sensitive to initial recall; may drift and pull hubs; extra passes.
-        Use when: you want quick recall boost from doc-seeded entities and moderate
-        latency is acceptable; centrality metrics are unavailable.
+        Algorithm Flow:
+        Step 1: Vector search to find seed documents
+        Step 2: Entity discovery & multi-relation graph expansion (CORE)
+        Step 3: Scoring algorithm combining vector + graph relevance
+        Final Step: Rank and format results
 
-        Diagram (Mermaid):
-        ```mermaid
-        flowchart TD
-            Q[Query] --> VS[Vector Search x2 top-k]
-            VS --> Seeds[Seed Documents]
-            Seeds --> E0[Entities via is_from]
-            E0 -->|is_a BFS| E1[Expanded Entities]
-            E1 -->|has_a 1-hop| E2[Expanded Entities]
-            E2 -->|related_to 1-hop optional| E3[Expanded Entities]
-            E3 --> Docs[Collect Docs via is_from]
-            Docs --> Cand[Candidate Points]
-            Q --> Embed[Embed Query]
-            Cand --> VSim[Vector Similarity]
-            Docs --> GRel[Graph Relevance to Seeds]
-            VSim --> Combine[Weighted Sum]
-            GRel --> Combine
-            Combine --> TopK[Top-k Results]
-        ```
+        Core concept: Start with vector search, expand through graph relationships
+        (is_a, has_a, related_to), and score using weighted combination of
+        vector similarity and entity overlap relevance.
+
+        Pros: Clean separation of concerns, focused on core graph expansion logic.
+        Cons: Simplified scoring without hub suppression or complex weighting.
         """
 
-        from dvs.utils.cosine_similarity import cosine_similarity
-
-        # Start timing
-        start_time = time.perf_counter()
-
-        # Ensure a single connection and load DuckPGQ once
         conn = conn or self.dvs.new_connection()
 
-        # Step 1: Vector search - Find most relevant documents
+        # Step 1: Vector search to find seed documents
         initial_results = await self.dvs.search(
             query=query,
-            top_k=top_k * 2,  # Expand candidate set
-            with_embedding=with_embedding,
+            top_k=top_k * 2,
+            with_embedding=True,
             conn=conn,
             verbose=self.dvs.v(verbose),
         )
@@ -1047,284 +1023,94 @@ class Graph:
         if not initial_results:
             return []
 
-        # Step 2: Find corresponding document nodes from document IDs
         document_ids = [doc.document_id for _, doc, _ in initial_results]
-        document_nodes = []
-        for doc_id in document_ids:
-            try:
-                doc_node = self.nodes.retrieve_by_label(
-                    doc_id,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
-                )
-                document_nodes.append(doc_node)
-            except Exception:
-                continue
 
-        # Step 3: Find related entity nodes through "is_from" relationship
+        # Step 2: Entity Discovery & Graph Expansion (CORE CONCEPT)
+        # Find entities connected to seed documents and expand through graph relations
         related_entities: set[str] = set()
         if document_ids:
             related_entities = self.collect_entities_via_is_from_for_documents(
-                document_ids, limit_per_doc=10, conn=conn, verbose=self.dvs.v(verbose)
+                document_ids, limit_per_doc=10, conn=conn, verbose=False
             )
 
-        # Step 3b: Expand entities using is_a (multi-hop as synonym),
-        #          has_a (1-hop), related_to (1-hop)
-        #  - is_a: treat as equivalence; explore both directions up to is_a_max_hops
-        #  - has_a: 1-hop in both directions; limited fanout
-        #  - related_to: 1-hop in both directions; limited fanout (stricter)
-        expanded_entity_ids: set[str] = set(related_entities)
-        if is_a_max_hops > 0 and len(expanded_entity_ids) < entity_expansion_cap:
-            expanded_entity_ids = self.expand_is_a_bfs(
-                expanded_entity_ids,
-                is_a_max_hops,
-                is_a_limit_per_hop,
-                cap_total=entity_expansion_cap,
-                conn=conn,
-                verbose=False,
-            )
-        if has_a_enabled and len(expanded_entity_ids) < entity_expansion_cap:
-            expanded_entity_ids |= self.expand_has_a_one_hop(
-                expanded_entity_ids,
-                has_a_limit_per_entity,
-                cap_total=entity_expansion_cap,
-                conn=conn,
-                verbose=False,
-            )
-
-        # related_to 1-hop (both directions, stricter fanout)
-        if related_to_enabled and len(expanded_entity_ids) < entity_expansion_cap:
-            seeds_for_related: list[str] = list(expanded_entity_ids)[
-                :entity_expansion_cap
-            ]
-            seed_doc_ids_set: set[str] = set(document_ids)
-            touch_cache: dict[str, bool] = {}
-
-            def _entity_touches_seed(entity_id: str) -> bool:
-                """Check if entity connects to any seed doc via is_from."""
-                cached = touch_cache.get(entity_id)
-                if cached is not None:
-                    return cached
-                ok: bool = False
-                try:
-                    neighbors = self.dvs.db.graph.get_neighbors(
-                        from_node_id_or_label=entity_id,
-                        relation=typing.cast(RelationType, RelationIsFrom),
-                        limit=5,
-                        conn=conn,
-                        verbose=False,
-                    )
-                    for _fn, _edge, to_node in neighbors:
-                        is_doc: bool = getattr(to_node, "kind", None) == "document"
-                        if is_doc and (to_node.label in seed_doc_ids_set):
-                            ok = True
-                            break
-                except Exception:
-                    ok = False
-                touch_cache[entity_id] = ok
-                return ok
-
-            for eid in seeds_for_related:
-                try:
-                    out_neighbors = self.dvs.db.graph.get_neighbors(
-                        from_node_id_or_label=eid,
-                        relation=RelationRelatedTo,
-                        limit=related_to_limit_per_entity,
-                        conn=conn,
-                        verbose=False,
-                    )
-                except Exception:
-                    out_neighbors = []
-                try:
-                    in_neighbors = self.dvs.db.graph.get_neighbors(
-                        to_node_id_or_label=eid,
-                        relation=RelationRelatedTo,
-                        limit=related_to_limit_per_entity,
-                        conn=conn,
-                        verbose=False,
-                    )
-                except Exception:
-                    in_neighbors = []
-
-                for from_node, _edge, to_node in list(out_neighbors) + list(
-                    in_neighbors
-                ):
-                    other = to_node if from_node.node_id == eid else from_node
-                    if getattr(other, "kind", None) == "entity":
-                        needs_touch: bool = (
-                            related_to_require_seed_touch
-                            and not _entity_touches_seed(other.node_id)
-                        )
-                        if needs_touch:
-                            continue
-                        expanded_entity_ids.add(other.node_id)
-                        if len(expanded_entity_ids) >= entity_expansion_cap:
-                            break
-                if len(expanded_entity_ids) >= entity_expansion_cap:
-                    break
-
-        # Counters for logging
-        seeds_count: int = len(related_entities)
-        pre_hub_entities_count: int = len(expanded_entity_ids)
-
-        # Hub suppression using PageRank over related_to graph
-        if suppress_hubs and expanded_entity_ids:
-            try:
-                expanded_entity_ids = self.suppress_hubs_by_pagerank(
-                    expanded_entity_ids,
-                    hub_pagerank_top_percent,
-                    conn=conn,
-                    relation=RelationRelatedTo,
-                    limit=5000,
-                )
-            except Exception:
-                pass
-
-        # Step 4: Graph expansion on these entity nodes to find more related documents
-        expanded_document_ids: set[str] = set(document_ids)
-        if graph_expansion_depth > 0:
-            expanded_document_ids |= self.collect_docs_via_is_from(
-                set(list(expanded_entity_ids)[: min(len(expanded_entity_ids), 200)]),
-                per_entity_limit=docs_per_entity_limit,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
-
-        # Compute summary counts and log (verbose)
-        suppressed_count: int = pre_hub_entities_count - len(expanded_entity_ids)
-        added_docs_count: int = len(expanded_document_ids.difference(set(document_ids)))
-        if self.dvs.v(verbose):
-            logger.info(
-                (
-                    f"[S1] seeds={seeds_count} "
-                    f"entities_after={len(expanded_entity_ids)} "
-                    f"suppressed={suppressed_count} "
-                    f"docs_added={added_docs_count}"
-                )
-            )
-
-        # Step 5: Re-vector search on expanded document collection
-        expanded_candidates = []
-        for point in self.gather_points_for_documents(
-            expanded_document_ids,
-            per_doc_limit=10,
-            with_embedding=True,
+        # Expand entities through multiple relation types for comprehensive coverage
+        expanded_entity_ids = self.expand_entities_with_multiple_relations(
+            related_entities,
+            is_a_max_hops=is_a_max_hops,
+            is_a_limit_per_hop=is_a_limit_per_hop,
+            has_a_enabled=has_a_enabled,
+            has_a_limit_per_entity=has_a_limit_per_entity,
+            related_to_enabled=related_to_enabled,
+            related_to_limit_per_entity=related_to_limit_per_entity,
+            suppress_hubs=False,  # Simplified version doesn't use hub suppression
+            entity_expansion_cap=entity_expansion_cap,
             conn=conn,
-            verbose=self.dvs.v(verbose),
-        ):
-            if point.embedding:
-                expanded_candidates.append(point)
+            verbose=False,
+        )
 
-        # Fall back to original results if no candidates found
-        if not expanded_candidates:
-            # Fallback: wrap initial results into GraphRAGResult
-            wrapped: list[GraphRAGResult] = []
-            # Normalize by top score if possible
-            max_score: float = float(initial_results[0][2]) if initial_results else 1.0
-            for idx, (_pt, doc, sc) in enumerate(initial_results[:top_k], start=1):
-                val: float = float(sc)
-                norm: float = (val / max_score) if max_score > 0 else 0.0
-                wrapped.append(
-                    GraphRAGResult(
-                        document=doc,
-                        score=val,
-                        vector_score=val,
-                        graph_score=0.0,
-                        iterations=None,
-                        rank=idx,
-                        normalized_score=norm,
-                        strategy="vector_expansion",
+        # Step 3: Scoring Algorithm - Combine vector and graph relevance
+        # Pre-cache all document nodes to avoid repeated database calls
+        doc_label_nodes: dict[str, "NodeType"] = {}
+        all_doc_ids = set(document_ids)  # Original seed documents
+
+        # Add current document IDs to cache
+        for doc_id in all_doc_ids:
+            try:
+                if doc_id not in doc_label_nodes:
+                    doc_label_nodes[doc_id] = self.dvs.db.graph.nodes.retrieve_by_label(
+                        doc_id, conn=conn, verbose=False
                     )
-                )
-            return wrapped
-
-        # Step 6: Calculate vector similarity for candidate points
-        query_vector: list[float] = await self.embed_query_vector(query)
-
-        scored_candidates: list[tuple[Point, float]] = []
-        for point in expanded_candidates:
-            try:
-                point_vector: list[float] = point.to_python()
-                similarity: float = cosine_similarity(query_vector, point_vector)
-                scored_candidates.append((point, similarity))
             except Exception:
                 continue
 
-        # Group by document and keep best vector score per document
-        doc_best: dict[str, tuple[Point, float]] = {}
-        for point, vec_score in scored_candidates:
-            doc_id: str = point.document_id
-            prev: tuple[Point, float] | None = doc_best.get(doc_id)
-            if prev is None or vec_score > prev[1]:
-                doc_best[doc_id] = (point, vec_score)
-
-        # Preload Document objects once
-        doc_map: dict[str, Document] = {}
-        for doc_id in doc_best.keys():
+        final_results: list[tuple[Document, float, float, float]] = []
+        for __point, doc, vec_score in initial_results:
             try:
-                doc_map[doc_id] = self.dvs.db.documents.retrieve(
-                    doc_id, conn=conn, verbose=self.dvs.v(verbose)
-                )
-            except Exception:
-                continue
-
-        # Compute graph relevance once per document (use shared conn)
-        graph_score_map: dict[str, float] = {}
-        for doc_id in doc_best.keys():
-            try:
-                graph_score_map[doc_id] = self.calculate_graph_relevance(
-                    doc_id,
+                # Use expanded entities directly for graph relevance calculation
+                graph_score: float = self.calculate_graph_relevance(
+                    doc.document_id,
                     document_ids,
-                    related_entities,
+                    expanded_entity_ids,
+                    doc_label_nodes=doc_label_nodes,
                     conn=conn,
-                    verbose=self.dvs.v(verbose),
+                    verbose=False,
+                )
+                # Weighted combination (CORE CONCEPT: weighted scoring)
+                combined_score: float = (
+                    vector_weight * float(vec_score) + graph_weight * graph_score
+                )
+                final_results.append(
+                    (doc, combined_score, float(vec_score), graph_score)
                 )
             except Exception:
-                graph_score_map[doc_id] = 0.0
+                final_results.append((doc, float(vec_score), float(vec_score), 0.0))
 
-        # Step 7: Combine scores at document level
-        final_results: list[tuple[Document, float, float]] = []
-        for doc_id, (_point, vec_score) in doc_best.items():
-            doc_obj: Document | None = doc_map.get(doc_id)
-            if doc_obj is None:
-                continue
-            gsc: float = float(graph_score_map.get(doc_id, 0.0))
-            combined_score: float = (
-                vector_weight * float(vec_score) + graph_weight * gsc
-            )
-            final_results.append((doc_obj, combined_score, float(vec_score)))
-
-        # Step 8: Sort by combined score and return top-k
-        final_results.sort(key=lambda x: x[2], reverse=True)
+        # Final Step: Rank and Format Results
+        final_results.sort(key=lambda x: x[1], reverse=True)
         top = final_results[:top_k]
-        # Normalize scores by top score
-        max_score: float = float(top[0][2]) if top else 1.0
+
         out: list[GraphRAGResult] = []
-        for idx, (doc, combined, vsc) in enumerate(top, start=1):
-            norm: float = (float(combined) / max_score) if max_score > 0 else 0.0
+        max_score: float = float(top[0][1]) if top else 1.0
+        for idx, (doc, combined, vec_score, graph_score) in enumerate(top, start=1):
             out.append(
                 GraphRAGResult(
                     document=doc,
                     score=float(combined),
-                    vector_score=float(vsc),
-                    graph_score=None,
+                    vector_score=float(vec_score),
+                    graph_score=float(graph_score),
                     iterations=None,
                     rank=idx,
-                    normalized_score=norm,
+                    normalized_score=(
+                        float(combined) / max_score if max_score > 0 else 0.0
+                    ),
                     strategy="vector_expansion",
                 )
             )
 
-        # End timing and log performance
-        end_time = time.perf_counter()
-        duration_ms = (end_time - start_time) * 1000
-        logger.info(
-            (
-                f"🔍 [Strategy 1: vector_expansion] Query: '{query[:50]}...' | "
-                + f"Top-k: {top_k} | Duration: {duration_ms:.3f} ms | "
-                + f"Results: {len(out)}"
+        if self.dvs.v(verbose):
+            logger.info(
+                f"🔍 [Simple Strategy 1] Query processed, found {len(out)} results"
             )
-        )
 
         return out
 
@@ -2518,32 +2304,283 @@ class Graph:
         original_doc_ids: list[str],
         related_entities: set[str],
         *,
+        doc_label_nodes: dict[str, "NodeType"] | None = None,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> float:
-        """Calculate graph relevance for a document"""
-        # Give higher score if document is in original search results
+        """
+        Calculate graph relevance for a document using entity-based scoring.
+
+        Algorithm combines:
+        1. Entity overlap score: How many expanded entities does this
+           document connect to?
+        2. Distance score: Graph distance to original documents (fallback)
+
+        Args:
+            target_doc_id: Target document ID to calculate relevance for
+            original_doc_ids: List of original seed document IDs
+            related_entities: Set of expanded entities from graph expansion
+            conn: Database connection (optional)
+            verbose: Verbosity flag (optional)
+
+        Returns:
+            Relevance score [0,1] combining entity overlap and distance
+        """
+        # Give maximum score if document is in original search results
         if target_doc_id in original_doc_ids:
             return 1.0
 
+        # Create document label to node cache to avoid repeated database calls
+        doc_label_nodes = {} if doc_label_nodes is None else doc_label_nodes
+
+        # If no related entities provided, fall back to distance-based scoring
+        if not related_entities:
+            return self.calculate_distance_based_relevance(
+                target_doc_id,
+                original_doc_ids,
+                doc_label_nodes,
+                conn=conn,
+                verbose=verbose,
+            )
+
+        # Calculate entity overlap score (primary algorithm)
+        entity_overlap_score = self.calculate_entity_overlap_score(
+            target_doc_id, related_entities, doc_label_nodes, conn=conn, verbose=verbose
+        )
+
+        # Calculate distance score as fallback/supplement
+        distance_score = self.calculate_distance_based_relevance(
+            target_doc_id, original_doc_ids, doc_label_nodes, conn=conn, verbose=verbose
+        )
+
+        # Combine scores: prioritize entity overlap but include distance as baseline
+        # Entity overlap is more direct indicator of relevance in our expanded graph
+        combined_score = 0.8 * entity_overlap_score + 0.2 * distance_score
+
+        return max(0.1, min(1.0, combined_score))
+
+    def calculate_entity_overlap_score(
+        self,
+        target_doc_id: str,
+        related_entities: set[str],
+        doc_label_nodes: dict[str, "NodeType"],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> float:
+        """
+        Calculate relevance based on entity overlap with expanded entity set.
+
+        Args:
+            target_doc_id: Target document ID
+            related_entities: Set of expanded entities from graph expansion
+            doc_label_nodes: Cached mapping of document IDs to Node objects
+
+        Returns:
+            Relevance score [0,1] based on entity overlap
+        """
+        if not related_entities:
+            return 0.0
+
+        try:
+            # Use cached node or retrieve if not available
+            if target_doc_id in doc_label_nodes:
+                target_node = doc_label_nodes[target_doc_id]
+            else:
+                target_node = self.dvs.db.graph.nodes.retrieve_by_label(
+                    target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
+                )
+                doc_label_nodes[target_doc_id] = target_node
+
+            # Find entities connected to this document via is_from relationship
+            doc_entities: set[str] = set()
+            neighbors = self.get_neighbors(
+                to_node_id_or_label=target_node.node_id,
+                relation=RelationIsFrom,
+                limit=50,  # Get reasonable number of connected entities
+                conn=conn,
+                verbose=False,
+            )
+
+            for _, _, from_node in neighbors:
+                if getattr(from_node, "kind", None) == "entity":
+                    doc_entities.add(from_node.node_id)
+
+            if not doc_entities:
+                return 0.1  # Document has no connected entities
+
+            # Calculate overlap ratio
+            overlap_count = len(doc_entities.intersection(related_entities))
+            overlap_ratio = (
+                overlap_count / len(related_entities) if related_entities else 0.0
+            )
+
+            # Add small bonus for any overlap (even if small ratio)
+            overlap_bonus = min(0.2, overlap_count * 0.1)
+
+            # Final score: combination of ratio and bonus
+            score = overlap_ratio + overlap_bonus
+
+            return min(1.0, score)
+
+        except Exception:
+            return 0.1  # Default low score on error
+
+    def expand_entities_with_multiple_relations(
+        self,
+        seed_entities: set[str],
+        *,
+        is_a_max_hops: int = 3,
+        is_a_limit_per_hop: int = 20,
+        has_a_enabled: bool = True,
+        has_a_limit_per_entity: int = 3,
+        related_to_enabled: bool = True,
+        related_to_limit_per_entity: int = 1,
+        suppress_hubs: bool = False,
+        hub_pagerank_top_percent: float = 0.1,
+        entity_expansion_cap: int = 200,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> set[str]:
+        """
+        Expand entities through multiple relation types (is_a, has_a, related_to).
+
+        This consolidates the common expansion pattern used in graph search strategies.
+        Includes optional hub suppression using PageRank.
+
+        Args:
+            seed_entities: Initial set of entity IDs to expand from
+            is_a_max_hops: Maximum hops for is_a expansion (multi-hop BFS)
+            is_a_limit_per_hop: Limit per hop for is_a expansion
+            has_a_enabled: Whether to enable has_a expansion
+            has_a_limit_per_entity: Limit per entity for has_a expansion
+            related_to_enabled: Whether to enable related_to expansion
+            related_to_limit_per_entity: Limit per entity for related_to expansion
+            suppress_hubs: Whether to suppress high-PageRank hub entities
+            hub_pagerank_top_percent: Top percentile to suppress for hub removal
+            entity_expansion_cap: Maximum total entities to expand to
+            conn: Database connection
+            verbose: Verbosity flag
+
+        Returns:
+            Expanded set of entity IDs
+        """
+        expanded_entity_ids: set[str] = set(seed_entities)
+
+        # is_a expansion (multi-hop BFS)
+        if is_a_max_hops > 0 and len(expanded_entity_ids) < entity_expansion_cap:
+            expanded_entity_ids = self.expand_is_a_bfs(
+                expanded_entity_ids,
+                is_a_max_hops,
+                is_a_limit_per_hop,
+                cap_total=entity_expansion_cap,
+                conn=conn,
+                verbose=verbose,
+            )
+
+        # has_a expansion (1-hop)
+        if has_a_enabled and len(expanded_entity_ids) < entity_expansion_cap:
+            expanded_entity_ids |= self.expand_has_a_one_hop(
+                expanded_entity_ids,
+                has_a_limit_per_entity,
+                cap_total=entity_expansion_cap,
+                conn=conn,
+                verbose=verbose,
+            )
+
+        # related_to expansion (1-hop)
+        if related_to_enabled and len(expanded_entity_ids) < entity_expansion_cap:
+            for eid in list(expanded_entity_ids)[:entity_expansion_cap]:
+                try:
+                    out_neighbors = self.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationRelatedTo,
+                        limit=related_to_limit_per_entity,
+                        conn=conn,
+                        verbose=verbose,
+                    )
+                    in_neighbors = self.get_neighbors(
+                        to_node_id_or_label=eid,
+                        relation=RelationRelatedTo,
+                        limit=related_to_limit_per_entity,
+                        conn=conn,
+                        verbose=verbose,
+                    )
+
+                    for from_node, _edge, to_node in list(out_neighbors) + list(
+                        in_neighbors
+                    ):
+                        other = to_node if from_node.node_id == eid else from_node
+                        if getattr(other, "kind", None) == "entity":
+                            expanded_entity_ids.add(other.node_id)
+                            if len(expanded_entity_ids) >= entity_expansion_cap:
+                                break
+                    if len(expanded_entity_ids) >= entity_expansion_cap:
+                        break
+                except Exception:
+                    continue
+
+        # Optional hub suppression using PageRank
+        if suppress_hubs and expanded_entity_ids:
+            try:
+                expanded_entity_ids = self.suppress_hubs_by_pagerank(
+                    expanded_entity_ids,
+                    hub_pagerank_top_percent,
+                    conn=conn,
+                    relation=RelationRelatedTo,
+                    limit=5000,
+                )
+            except Exception:
+                pass  # Continue without suppression if it fails
+
+        return expanded_entity_ids
+
+    def calculate_distance_based_relevance(
+        self,
+        target_doc_id: str,
+        original_doc_ids: list[str],
+        doc_label_nodes: dict[str, "NodeType"],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> float:
+        """
+        Calculate relevance based on graph distance to original documents.
+
+        Args:
+            target_doc_id: Target document ID
+            original_doc_ids: List of original seed document IDs
+            doc_label_nodes: Cached mapping of document IDs to Node objects
+
+        Returns:
+            Relevance score [0,1] based on graph distance
+        """
         # Calculate graph distance to original documents
         min_distance = float("inf")
 
         try:
-            # Try to find target document node
-            # Resolve by label (document_id)
-            target_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
-            )
+            # Use cached target node or retrieve if not available
+            if target_doc_id in doc_label_nodes:
+                target_node = doc_label_nodes[target_doc_id]
+            else:
+                target_node = self.dvs.db.graph.nodes.retrieve_by_label(
+                    target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
+                )
+                doc_label_nodes[target_doc_id] = target_node
 
             for original_doc_id in original_doc_ids:
                 try:
-                    original_node = self.dvs.db.graph.nodes.retrieve_by_label(
-                        original_doc_id, conn=conn, verbose=False
-                    )
+                    # Use cached original node or retrieve if not available
+                    if original_doc_id in doc_label_nodes:
+                        original_node = doc_label_nodes[original_doc_id]
+                    else:
+                        original_node = self.dvs.db.graph.nodes.retrieve_by_label(
+                            original_doc_id, conn=conn, verbose=False
+                        )
+                        doc_label_nodes[original_doc_id] = original_node
 
                     # Calculate shortest path distance
-                    paths = self.dvs.db.graph.get_shortest_paths(
+                    paths = self.get_shortest_paths(
                         from_node_id_or_label=original_node.node_id,
                         to_node_id_or_label=target_node.node_id,
                         limit=1,
@@ -2561,7 +2598,7 @@ class Graph:
         except Exception:
             return 0.1  # Default low score
 
-        # Higher score for closer distance
+        # Convert distance to relevance score
         if min_distance == float("inf"):
             return 0.1
         elif min_distance == 0:
