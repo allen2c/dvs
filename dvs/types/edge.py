@@ -60,3 +60,13 @@ class Edge(pydantic.BaseModel):
         else:
             self.relation = _relation  # type: ignore
         return self
+
+    def __hash__(self) -> int:
+        """Make Edge hashable using edge_id."""
+        return hash(self.edge_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare Edges based on edge_id for hash consistency."""
+        if not isinstance(other, Edge):
+            return NotImplemented
+        return self.edge_id == other.edge_id

@@ -357,7 +357,7 @@
                 return {
                     id: node.node_id || node.id,
                     label: node.label,
-                    size: node.kind === 'document' ? 15 : 10,
+                    size: node.kind === 'document' ? 8 : 5,
                     color: color,
                     kind: node.kind,
                     entity: node.entity,
@@ -372,7 +372,7 @@
                 target: edge.target,
                 label: edge.relation,
                 color: '#95a5a6',
-                size: 1.5
+                size: 0.8
             }));
 
             return { nodes, edges };
@@ -404,22 +404,22 @@
             try {
                 layoutRunning = true;
 
-                // Reduced iterations for better performance
-                const totalIterations = Math.min(20, Math.max(10, Math.ceil(graph.nodes().length / 10)));
+                // Increased iterations for large graphs
+                const totalIterations = Math.min(50, Math.max(20, Math.ceil(graph.nodes().length / 20)));
 
                 const settings = {
                     iterations: totalIterations,
                     settings: {
-                        gravity: 0.3,
-                        scalingRatio: 2.0,
+                        gravity: 0.1, // Reduced gravity for more spread
+                        scalingRatio: 4.0, // Increased scaling for larger distances
                         strongGravityMode: false,
                         barnesHutOptimize: true,
-                        barnesHutTheta: 1.2,
-                        slowDown: 3,
+                        barnesHutTheta: 2.0, // Increased theta for better performance with large graphs
+                        slowDown: 5, // Increased slowdown for more stable layout
                         linLogMode: false,
                         outboundAttractionDistribution: false,
                         adjustSizes: false,
-                        edgeWeightInfluence: 0.8
+                        edgeWeightInfluence: 0.5 // Reduced edge influence for more spread
                     }
                 };
 
@@ -490,7 +490,7 @@
 
             const nodes = graph.nodes();
             const nodeCount = nodes.length;
-            const radius = Math.min(500, Math.max(200, nodeCount * 8));
+            const radius = Math.min(1500, Math.max(600, nodeCount * 15));
 
             // Separate entities and documents for better visualization
             const entities = [];
@@ -526,7 +526,7 @@
             let ringIndex = 0;
             Object.keys(entityTypes).forEach(type => {
                 const typeNodes = entityTypes[type];
-                const typeRadius = radius * (0.3 + (ringIndex * 0.15));
+                const typeRadius = radius * (0.4 + (ringIndex * 0.25));
 
                 typeNodes.forEach((node, index) => {
                     const angle = (index * 2 * Math.PI) / typeNodes.length;
@@ -553,10 +553,10 @@
             const edgeCount = edges.length;
 
             // Adaptive parameters based on graph size - optimized for maximum dispersion
-            const totalIterations = Math.min(500, Math.max(30, Math.ceil(nodeCount / 2)));
-            const optimalDistance = Math.max(180, Math.min(450, Math.sqrt(nodeCount) * 35)); // Much larger optimal distance
-            const canvasSize = Math.max(1200, nodeCount * 30); // Much larger canvas
-            const repulsionStrength = Math.max(2.5, 4.0 - (nodeCount / 80)); // Significantly stronger repulsion
+            const totalIterations = Math.min(800, Math.max(50, Math.ceil(nodeCount / 1.5)));
+            const optimalDistance = Math.max(800, Math.min(2000, Math.sqrt(nodeCount) * 50)); // Much larger optimal distance for 5000+ nodes
+            const canvasSize = Math.max(2000, nodeCount * 80); // Much larger canvas for 5000+ nodes
+            const repulsionStrength = Math.max(15.0, 25.0 - (nodeCount / 200)); // Much stronger repulsion for large graphs
 
             // Initialize positions if not set
             nodes.forEach(node => {
@@ -594,7 +594,7 @@
                 });
 
                                 // Enhanced repulsion forces for maximum dispersion
-                const maxRepulsionDistance = optimalDistance * 5; // Even larger range
+                const maxRepulsionDistance = optimalDistance * 8; // Much larger range for 5000+ nodes
                 nodes.forEach((node1, i) => {
                     const pos1 = {
                         x: graph.getNodeAttribute(node1, 'x'),
@@ -616,8 +616,8 @@
 
                         // Much stronger repulsion with exponential falloff for maximum dispersion
                         const normalizedDistance = Math.max(distance / optimalDistance, 0.1);
-                        const repulsionForce = (repulsionStrength * optimalDistance * 1.5) / (normalizedDistance * normalizedDistance);
-                        const force = Math.min(repulsionForce, optimalDistance * 1.2);
+                        const repulsionForce = (repulsionStrength * optimalDistance * 3.0) / (normalizedDistance * normalizedDistance);
+                        const force = Math.min(repulsionForce, optimalDistance * 2.5);
 
                         forces[node1].x += (dx / distance) * force;
                         forces[node1].y += (dy / distance) * force;
@@ -662,9 +662,9 @@
                     forces[target].y -= (dy / distance) * springForce;
                 });
 
-                // Apply forces with temperature-based damping - allow larger movements
-                const dampening = 0.15 * temperature + 0.03;
-                const maxMove = optimalDistance * temperature * 0.5;
+                // Apply forces with temperature-based damping - allow larger movements for large graphs
+                const dampening = 0.25 * temperature + 0.05;
+                const maxMove = optimalDistance * temperature * 1.2;
 
                 nodes.forEach(node => {
                     const currentX = graph.getNodeAttribute(node, 'x');
@@ -889,16 +889,16 @@
                     if (nodeId === hoveredNodeId) {
                         // Main hovered node - make it bigger and brighter
                         graph.setNodeAttribute(nodeId, 'color', '#ff6b35');
-                        graph.setNodeAttribute(nodeId, 'size', attributes.size * 1.8);
+                        graph.setNodeAttribute(nodeId, 'size', attributes.size * 2.5);
                     } else {
                         // Connected neighbors - slight highlight
                         graph.setNodeAttribute(nodeId, 'color', '#ffab00');
-                        graph.setNodeAttribute(nodeId, 'size', attributes.size * 1.3);
+                        graph.setNodeAttribute(nodeId, 'size', attributes.size * 1.8);
                     }
                 } else {
                     // Dim non-connected nodes
                     graph.setNodeAttribute(nodeId, 'color', '#cccccc');
-                    graph.setNodeAttribute(nodeId, 'size', attributes.size * 0.7);
+                    graph.setNodeAttribute(nodeId, 'size', attributes.size * 0.4);
                 }
             });
 
@@ -912,11 +912,11 @@
                 if (connectedEdges.has(edgeId)) {
                     // Highlight connected edges
                     graph.setEdgeAttribute(edgeId, 'color', '#ff6b35');
-                    graph.setEdgeAttribute(edgeId, 'size', Math.max(attributes.size * 2, 3));
+                    graph.setEdgeAttribute(edgeId, 'size', Math.max(attributes.size * 3, 2));
                 } else {
                     // Dim non-connected edges
                     graph.setEdgeAttribute(edgeId, 'color', '#e0e0e0');
-                    graph.setEdgeAttribute(edgeId, 'size', attributes.size * 0.5);
+                    graph.setEdgeAttribute(edgeId, 'size', attributes.size * 0.3);
                 }
             });
 

@@ -271,3 +271,13 @@ class Document(pydantic.BaseModel):
             self.total_tokens = len(encoding.encode(self.content))
 
         return self
+
+    def __hash__(self) -> int:
+        """Make Document hashable using document_id."""
+        return hash(self.document_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare Documents based on document_id for hash consistency."""
+        if not isinstance(other, Document):
+            return NotImplemented
+        return self.document_id == other.document_id

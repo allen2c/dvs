@@ -16,7 +16,6 @@ from dvs.types.edge import (
     RelationRelatedTo,
     RelationType,
 )
-from dvs.types.graphrag_result import GraphRAGResult
 from dvs.types.node import Node as NodeType
 from dvs.types.point import Point
 from dvs.utils.debug_print import debug_print
@@ -221,36 +220,6 @@ class Utils:
 
         return expanded
 
-    def suppress_hubs_by_pagerank(
-        self,
-        entity_ids: set[str],
-        top_percent: float,
-        *,
-        conn: duckdb.DuckDBPyConnection | None = None,
-        relation: RelationType = RelationRelatedTo,
-        limit: int = 5000,
-    ) -> set[str]:
-        """Remove high-PageRank hubs above the given percentile cutoff."""
-        if not entity_ids:
-            return set()
-        try:
-            pr = self.dvs.db.graph.algorithm.pagerank(
-                conn=conn,
-                relation=relation,
-                limit=limit,
-                verbose=False,
-            )
-            pr_map: dict[str, float] = {nid: sc for nid, sc in pr}
-            if not pr_map:
-                return set(entity_ids)
-            scores: list[float] = sorted(pr_map.values(), reverse=True)
-            pct: float = max(0.0, min(1.0, top_percent))
-            idx: int = max(0, min(len(scores) - 1, int(len(scores) * pct) - 1))
-            cutoff: float = scores[idx]
-            return {eid for eid in entity_ids if pr_map.get(eid, 0.0) < cutoff}
-        except Exception:
-            return set(entity_ids)
-
     def collect_docs_via_is_from(
         self,
         entity_ids: set[str],
@@ -366,16 +335,6 @@ class Utils:
                 continue
         return points
 
-    def normalize_by_top(self, values: list[float]) -> list[float]:
-        """Normalize values by top value; 0 if top is 0 or empty."""
-        if not values:
-            return []
-        top: float = float(values[0]) if values else 0.0
-        top = top if top > 0 else (max(values) if values else 0.0)
-        if top <= 0:
-            return [0.0 for _ in values]
-        return [float(v) / float(top) for v in values]
-
     def expand_entities(
         self,
         seed_entities: set[str],
@@ -384,156 +343,126 @@ class Utils:
         is_a_limit_per_hop: int = 20,
         has_a_enabled: bool = True,
         has_a_limit_per_entity: int = 3,
-        suppress_hubs: bool = True,
-        hub_pagerank_top_percent: float = 0.1,
-        cap_total: int | None = None,
+        related_to_enabled: bool = False,
+        related_to_limit_per_entity: int = 1,
+        entity_expansion_cap: int | None = None,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> set[str]:
-        """Expand entities via is_a and has_a, then suppress hubs by PageRank."""
-        expanded: set[str] = set(seed_entities)
-        if is_a_max_hops > 0 and expanded:
-            expanded = self.expand_is_a_bfs(
-                expanded,
+        """
+        Expand entities through multiple relation types.
+
+        Unified implementation combining entity expansion via is_a, has_a,
+        and related_to relations.
+
+        Args:
+            seed_entities: Initial set of entity IDs to expand from
+            is_a_max_hops: Maximum hops for is_a expansion (multi-hop BFS)
+            is_a_limit_per_hop: Limit per hop for is_a expansion
+            has_a_enabled: Whether to enable has_a expansion
+            has_a_limit_per_entity: Limit per entity for has_a expansion
+            related_to_enabled: Whether to enable related_to expansion
+            related_to_limit_per_entity: Limit per entity for related_to expansion
+            entity_expansion_cap: Maximum total entities to expand to (None = no limit)
+            conn: Database connection
+            verbose: Verbosity flag
+
+        Returns:
+            Expanded set of entity IDs
+        """
+        expanded_entity_ids: set[str] = set(seed_entities)
+
+        # is_a expansion (multi-hop BFS)
+        if is_a_max_hops > 0 and (
+            entity_expansion_cap is None
+            or len(expanded_entity_ids) < entity_expansion_cap
+        ):
+            expanded_entity_ids = self.expand_is_a_bfs(
+                expanded_entity_ids,
                 is_a_max_hops,
                 is_a_limit_per_hop,
-                cap_total=cap_total,
+                cap_total=entity_expansion_cap,
                 conn=conn,
-                verbose=self.dvs.v(verbose),
+                verbose=verbose,
             )
-        if has_a_enabled and expanded:
-            expanded |= self.expand_has_a_one_hop(
-                expanded,
+
+        # has_a expansion (1-hop)
+        if has_a_enabled and (
+            entity_expansion_cap is None
+            or len(expanded_entity_ids) < entity_expansion_cap
+        ):
+            expanded_entity_ids |= self.expand_has_a_one_hop(
+                expanded_entity_ids,
                 has_a_limit_per_entity,
-                cap_total=cap_total,
+                cap_total=entity_expansion_cap,
                 conn=conn,
-                verbose=self.dvs.v(verbose),
+                verbose=verbose,
             )
-        if suppress_hubs and expanded:
-            expanded = self.suppress_hubs_by_pagerank(
-                expanded,
-                hub_pagerank_top_percent,
-                conn=conn,
-                relation=RelationRelatedTo,
-                limit=5000,
-            )
-        return expanded
 
-    def wrap_base_results_as_graphrag(
+        # related_to expansion (1-hop)
+        if related_to_enabled and (
+            entity_expansion_cap is None
+            or len(expanded_entity_ids) < entity_expansion_cap
+        ):
+            slice_limit = (
+                entity_expansion_cap
+                if entity_expansion_cap
+                else len(expanded_entity_ids)
+            )
+            for eid in list(expanded_entity_ids)[:slice_limit]:
+                try:
+                    out_neighbors = self.get_neighbors(
+                        from_node_id_or_label=eid,
+                        relation=RelationRelatedTo,
+                        limit=related_to_limit_per_entity,
+                        conn=conn,
+                        verbose=verbose,
+                    )
+                    in_neighbors = self.get_neighbors(
+                        to_node_id_or_label=eid,
+                        relation=RelationRelatedTo,
+                        limit=related_to_limit_per_entity,
+                        conn=conn,
+                        verbose=verbose,
+                    )
+
+                    all_neighbors = list(out_neighbors) + list(in_neighbors)
+                    for from_node, _edge, to_node in all_neighbors:
+                        other = to_node if from_node.node_id == eid else from_node
+                        if getattr(other, "kind", None) == "entity":
+                            expanded_entity_ids.add(other.node_id)
+                            if (
+                                entity_expansion_cap
+                                and len(expanded_entity_ids) >= entity_expansion_cap
+                            ):
+                                break
+                    if (
+                        entity_expansion_cap
+                        and len(expanded_entity_ids) >= entity_expansion_cap
+                    ):
+                        break
+                except Exception:
+                    continue
+
+        return expanded_entity_ids
+
+    def _get_or_cache_node(
         self,
-        base: list[tuple[Point, Document, float]],
-        *,
-        top_k: int,
-        strategy: typing.Literal[
-            "default",
-            "vector_expansion",
-            "graph_guided",
-            "context_aware",
-            "iterative_refinement",
-        ] = "default",
-        graph_score_value: float | None = 0.0,
-    ) -> list[GraphRAGResult]:
-        """Convert vector-only results into GraphRAGResult with normalization."""
-        max_score: float = float(base[0][2]) if base else 1.0
-        out: list[GraphRAGResult] = []
-        for i, (_p, doc, sc) in enumerate(base[:top_k]):
-            val: float = float(sc)
-            norm: float = (val / max_score) if max_score > 0 else 0.0
-            out.append(
-                GraphRAGResult(
-                    document=doc,
-                    score=val,
-                    vector_score=val if graph_score_value is not None else None,
-                    graph_score=graph_score_value,
-                    iterations=None,
-                    rank=i + 1,
-                    normalized_score=norm,
-                    strategy=strategy,
-                )
-            )
-        return out
-
-    def get_graph_importance_for_document(
-        self,
-        document_id: str,
-        *,
-        pagerank_map: dict[str, float],
-        max_pagerank: float,
-        is_a_max_hops: int,
-        is_a_limit_per_hop: int,
-        has_a_enabled: bool,
-        has_a_limit_per_entity: int,
-        suppress_hubs: bool,
-        hub_pagerank_top_percent: float,
-        conn: duckdb.DuckDBPyConnection | None = None,
-    ) -> float:
-        """Return normalized graph importance [0,1] for a document node."""
-        if document_id in pagerank_map and max_pagerank > 0:
-            return pagerank_map[document_id] / max_pagerank
-
-        try:
-            neighbors = self.get_neighbors(
-                to_node_id_or_label=document_id,
-                relation=RelationIsFrom,
-                limit=30,
-                conn=conn,
-                verbose=False,
-            )
-            entities: set[str] = set()
-            for _, _, to_node in neighbors:
-                if getattr(to_node, "kind", None) == "entity":
-                    entities.add(to_node.node_id)
-
-            if is_a_max_hops > 0 and entities:
-                entities = self.expand_is_a_bfs(
-                    entities,
-                    is_a_max_hops,
-                    is_a_limit_per_hop,
-                    conn=conn,
-                    verbose=False,
-                )
-
-            if has_a_enabled and entities:
-                entities |= self.expand_has_a_one_hop(
-                    entities,
-                    has_a_limit_per_entity,
-                    conn=conn,
-                    verbose=False,
-                )
-
-            if suppress_hubs and entities:
-                entities = self.suppress_hubs_by_pagerank(
-                    entities,
-                    hub_pagerank_top_percent,
-                    conn=conn,
-                    relation=RelationRelatedTo,
-                    limit=5000,
-                )
-
-            best: float = 0.0
-            for eid in entities:
-                node_score = pagerank_map.get(eid, 0.0)
-                if max_pagerank > 0:
-                    best = max(best, node_score / max_pagerank)
-            return best
-        except Exception:
-            return 0.0
-
-    def get_graph_distance_score(
-        self,
-        document_id: str,
-        original_doc_ids: list[str],
+        doc_id: str,
+        doc_label_nodes: dict[str, "NodeType"],
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
-    ) -> float:
-        """Distance score [0,1] derived from shortest path to seeds."""
-        return self.calculate_graph_relevance(
-            document_id,
-            original_doc_ids,
-            related_entities=set(),
-            conn=conn,
-            verbose=False,
+        verbose: bool | None = None,
+    ) -> "NodeType":
+        """Get node from cache or retrieve from database and cache it."""
+        if doc_id in doc_label_nodes:
+            return doc_label_nodes[doc_id]
+
+        node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
+            doc_id, conn=conn, verbose=self.dvs.v(verbose)
         )
+        doc_label_nodes[doc_id] = node
+        return node
 
     def calculate_graph_relevance(
         self,
@@ -621,13 +550,9 @@ class Utils:
 
         try:
             # Use cached node or retrieve if not available
-            if target_doc_id in doc_label_nodes:
-                target_node = doc_label_nodes[target_doc_id]
-            else:
-                target_node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
-                    target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
-                )
-                doc_label_nodes[target_doc_id] = target_node
+            target_node = self._get_or_cache_node(
+                target_doc_id, doc_label_nodes, conn=conn, verbose=verbose
+            )
 
             # Find entities connected to this document via is_from relationship
             doc_entities: set[str] = set()
@@ -663,115 +588,6 @@ class Utils:
         except Exception:
             return 0.1  # Default low score on error
 
-    def expand_entities_with_multiple_relations(
-        self,
-        seed_entities: set[str],
-        *,
-        is_a_max_hops: int = 3,
-        is_a_limit_per_hop: int = 20,
-        has_a_enabled: bool = True,
-        has_a_limit_per_entity: int = 3,
-        related_to_enabled: bool = True,
-        related_to_limit_per_entity: int = 1,
-        suppress_hubs: bool = False,
-        hub_pagerank_top_percent: float = 0.1,
-        entity_expansion_cap: int = 200,
-        conn: duckdb.DuckDBPyConnection | None = None,
-        verbose: bool | None = None,
-    ) -> set[str]:
-        """
-        Expand entities through multiple relation types (is_a, has_a, related_to).
-
-        This consolidates the common expansion pattern used in graph search strategies.
-        Includes optional hub suppression using PageRank.
-
-        Args:
-            seed_entities: Initial set of entity IDs to expand from
-            is_a_max_hops: Maximum hops for is_a expansion (multi-hop BFS)
-            is_a_limit_per_hop: Limit per hop for is_a expansion
-            has_a_enabled: Whether to enable has_a expansion
-            has_a_limit_per_entity: Limit per entity for has_a expansion
-            related_to_enabled: Whether to enable related_to expansion
-            related_to_limit_per_entity: Limit per entity for related_to expansion
-            suppress_hubs: Whether to suppress high-PageRank hub entities
-            hub_pagerank_top_percent: Top percentile to suppress for hub removal
-            entity_expansion_cap: Maximum total entities to expand to
-            conn: Database connection
-            verbose: Verbosity flag
-
-        Returns:
-            Expanded set of entity IDs
-        """
-        expanded_entity_ids: set[str] = set(seed_entities)
-
-        # is_a expansion (multi-hop BFS)
-        if is_a_max_hops > 0 and len(expanded_entity_ids) < entity_expansion_cap:
-            expanded_entity_ids = self.expand_is_a_bfs(
-                expanded_entity_ids,
-                is_a_max_hops,
-                is_a_limit_per_hop,
-                cap_total=entity_expansion_cap,
-                conn=conn,
-                verbose=verbose,
-            )
-
-        # has_a expansion (1-hop)
-        if has_a_enabled and len(expanded_entity_ids) < entity_expansion_cap:
-            expanded_entity_ids |= self.expand_has_a_one_hop(
-                expanded_entity_ids,
-                has_a_limit_per_entity,
-                cap_total=entity_expansion_cap,
-                conn=conn,
-                verbose=verbose,
-            )
-
-        # related_to expansion (1-hop)
-        if related_to_enabled and len(expanded_entity_ids) < entity_expansion_cap:
-            for eid in list(expanded_entity_ids)[:entity_expansion_cap]:
-                try:
-                    out_neighbors = self.get_neighbors(
-                        from_node_id_or_label=eid,
-                        relation=RelationRelatedTo,
-                        limit=related_to_limit_per_entity,
-                        conn=conn,
-                        verbose=verbose,
-                    )
-                    in_neighbors = self.get_neighbors(
-                        to_node_id_or_label=eid,
-                        relation=RelationRelatedTo,
-                        limit=related_to_limit_per_entity,
-                        conn=conn,
-                        verbose=verbose,
-                    )
-
-                    for from_node, _edge, to_node in list(out_neighbors) + list(
-                        in_neighbors
-                    ):
-                        other = to_node if from_node.node_id == eid else from_node
-                        if getattr(other, "kind", None) == "entity":
-                            expanded_entity_ids.add(other.node_id)
-                            if len(expanded_entity_ids) >= entity_expansion_cap:
-                                break
-                    if len(expanded_entity_ids) >= entity_expansion_cap:
-                        break
-                except Exception:
-                    continue
-
-        # Optional hub suppression using PageRank
-        if suppress_hubs and expanded_entity_ids:
-            try:
-                expanded_entity_ids = self.suppress_hubs_by_pagerank(
-                    expanded_entity_ids,
-                    hub_pagerank_top_percent,
-                    conn=conn,
-                    relation=RelationRelatedTo,
-                    limit=5000,
-                )
-            except Exception:
-                pass  # Continue without suppression if it fails
-
-        return expanded_entity_ids
-
     def calculate_distance_based_relevance(
         self,
         target_doc_id: str,
@@ -797,26 +613,16 @@ class Utils:
 
         try:
             # Use cached target node or retrieve if not available
-            if target_doc_id in doc_label_nodes:
-                target_node = doc_label_nodes[target_doc_id]
-            else:
-                target_node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
-                    target_doc_id, conn=conn, verbose=self.dvs.v(verbose)
-                )
-                doc_label_nodes[target_doc_id] = target_node
+            target_node = self._get_or_cache_node(
+                target_doc_id, doc_label_nodes, conn=conn, verbose=verbose
+            )
 
             for original_doc_id in original_doc_ids:
                 try:
                     # Use cached original node or retrieve if not available
-                    if original_doc_id in doc_label_nodes:
-                        original_node = doc_label_nodes[original_doc_id]
-                    else:
-                        original_node = (
-                            self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
-                                original_doc_id, conn=conn, verbose=False
-                            )
-                        )
-                        doc_label_nodes[original_doc_id] = original_node
+                    original_node = self._get_or_cache_node(
+                        original_doc_id, doc_label_nodes, conn=conn, verbose=False
+                    )
 
                     # Calculate shortest path distance
                     paths = self.dvs.db.graph.algorithm.get_shortest_paths(
@@ -913,7 +719,7 @@ class Utils:
             )
 
         # Expand entities through multiple relations
-        expanded_entity_ids = self.expand_entities_with_multiple_relations(
+        expanded_entity_ids = self.expand_entities(
             related_entities,
             is_a_max_hops=is_a_max_hops,
             is_a_limit_per_hop=is_a_limit_per_hop,
@@ -921,7 +727,6 @@ class Utils:
             has_a_limit_per_entity=has_a_limit_per_entity,
             related_to_enabled=related_to_enabled,
             related_to_limit_per_entity=related_to_limit_per_entity,
-            suppress_hubs=False,
             entity_expansion_cap=entity_expansion_cap,
             conn=conn,
             verbose=verbose,

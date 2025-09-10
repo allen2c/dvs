@@ -123,3 +123,13 @@ class Point(pydantic.BaseModel):
         return np.frombuffer(
             base64.b64decode(self.embedding), dtype=np.float32
         ).tolist()
+
+    def __hash__(self) -> int:
+        """Make Point hashable using point_id."""
+        return hash(self.point_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare Points based on point_id for hash consistency."""
+        if not isinstance(other, Point):
+            return NotImplemented
+        return self.point_id == other.point_id

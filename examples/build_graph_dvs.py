@@ -102,16 +102,13 @@ async def main():
         "[bold cyan]Unified Graph-RAG Comparison (Strategies 1-5) - Quick Mode[/bold cyan]"  # noqa: E501
     )
 
-    query: str = "Where are Michelin restaurants?"
+    # query: str = "Where are Michelin restaurants?"
+    query: str = "充電器送到打電話"
 
     # Parameters for fairness
-    topk: int = 3
+    topk: int = 5
     vec_w: float = 0.7
     graph_w: float = 0.3
-    centrality_th: float = 0.5
-    hybrid_vec_w: float = 0.7
-    hybrid_imp_w: float = 0.2
-    hybrid_dist_w: float = 0.1
     ctx_th: float = 0.5
 
     def fmt_item(i: int, item: GraphRAGResult) -> str:
@@ -124,77 +121,57 @@ async def main():
             s += f" | iters={item.iterations}"
         return s
 
-    try:
-        s1 = await dvs_client.db.graph.search_vector_expansion(
-            query,
-            top_k=topk,
-            vector_weight=vec_w,
-            graph_weight=graph_w,
-            verbose=VERBOSE,
-        )
+    s1 = await dvs_client.db.graph.search_vector_expansion(
+        query,
+        top_k=topk,
+        vector_weight=vec_w,
+        graph_weight=graph_w,
+        verbose=VERBOSE,
+    )
 
-        s2 = await dvs_client.db.graph.search_graph_guided(
-            query,
-            top_k=topk,
-            centrality_threshold=centrality_th,
-            vector_weight=vec_w,
-            graph_weight=graph_w,
-            verbose=VERBOSE,
-        )
+    s2 = await dvs_client.db.graph.search_graph_guided(
+        query,
+        top_k=topk,
+        vector_weight=vec_w,
+        graph_weight=graph_w,
+        verbose=VERBOSE,
+    )
 
-        s3 = await dvs_client.db.graph.search_hybrid_scoring(
-            query,
-            top_k=topk,
-            vector_weight=hybrid_vec_w,
-            graph_importance_weight=hybrid_imp_w,
-            graph_distance_weight=hybrid_dist_w,
-            verbose=VERBOSE,
-        )
-
-        expander = build_llm_query_expander(
+    s3 = await dvs_client.db.graph.search_iterative_refinement(
+        query,
+        top_k=topk,
+        max_iterations=1,
+        refinement_threshold=0.01,
+        expansions_per_iter=1,
+        query_expander=build_llm_query_expander(
             chat_model,
             max_suggestions=3,
             system_prompt=None,
             verbose=VERBOSE,
-        )
+        ),
+        verbose=VERBOSE,
+    )
 
-        s4 = await dvs_client.db.graph.search_iterative_refinement(
-            query,
-            top_k=topk,
-            max_iterations=1,
-            refinement_threshold=0.01,
-            expansions_per_iter=1,
-            query_expander=expander,
-            verbose=VERBOSE,
-        )
+    s4 = await dvs_client.db.graph.search_context_aware(
+        query,
+        top_k=topk,
+        context_similarity_threshold=ctx_th,
+        verbose=VERBOSE,
+    )
 
-        s5 = await dvs_client.db.graph.search_context_aware(
-            query,
-            top_k=topk,
-            context_similarity_threshold=ctx_th,
-            max_expansion_steps=1,
-            verbose=VERBOSE,
-        )
-
-        print("\n📊 Unified Comparison (top-3):")
-        print("1) Strategy 1 - Vector + Graph Expansion")
-        for i, item in enumerate(s1, 1):
-            print("   " + fmt_item(i, item))
-        print("2) Strategy 2 - Graph-Guided Vector Search")
-        for i, item in enumerate(s2, 1):
-            print("   " + fmt_item(i, item))
-        print("3) Strategy 3 - Hybrid Scoring")
-        for i, item in enumerate(s3, 1):
-            print("   " + fmt_item(i, item))
-        print("4) Strategy 4 - Iterative Refinement")
-        for i, item in enumerate(s4, 1):
-            print("   " + fmt_item(i, item))
-        print("5) Strategy 5 - Context-Aware Expansion")
-        for i, item in enumerate(s5, 1):
-            print("   " + fmt_item(i, item))
-
-    except Exception as e:
-        print(f"⚠️ Error in unified comparison: {e}")
+    print(f"\n📊 Unified Comparison (top-k={topk}):")
+    print("1) Strategy 1 - Vector + Graph Expansion")
+    for i, item in enumerate(s1, 1):
+        print("   " + fmt_item(i, item))
+    print("2) Strategy 2 - Graph-Guided Vector Search")
+    for i, item in enumerate(s2, 1):
+        print("   " + fmt_item(i, item))
+    print("3) Strategy 3 - Iterative Refinement")
+    for i, item in enumerate(s3, 1):
+        print("   " + fmt_item(i, item))
+    print("4) Strategy 4 - Context-Aware Expansion")
+    for i, item in enumerate(s4, 1):
+        print("   " + fmt_item(i, item))
 
     return
 

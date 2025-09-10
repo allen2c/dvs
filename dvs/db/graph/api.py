@@ -387,8 +387,6 @@ class Graph:
             is_a_limit_per_hop=10,  # Simplified limit
             has_a_enabled=True,
             has_a_limit_per_entity=5,  # Simplified limit
-            suppress_hubs=False,  # Keep simple, no hub suppression
-            cap_total=300,  # Reasonable cap to prevent explosion
             conn=conn,
             verbose=self.dvs.v(verbose),
         )
@@ -512,8 +510,6 @@ class Graph:
         is_a_limit_per_hop: int = 20,
         has_a_enabled: bool = True,
         has_a_limit_per_entity: int = 3,
-        suppress_hubs: bool = True,
-        hub_pagerank_top_percent: float = 0.1,
         entity_expansion_cap: int = 200,
         verbose: bool | None = None,
     ) -> list[GraphRAGResult]:
@@ -602,9 +598,6 @@ class Graph:
                 is_a_limit_per_hop=is_a_limit_per_hop,
                 has_a_enabled=has_a_enabled,
                 has_a_limit_per_entity=has_a_limit_per_entity,
-                suppress_hubs=suppress_hubs,
-                hub_pagerank_top_percent=hub_pagerank_top_percent,
-                cap_total=200,
                 conn=conn,
                 verbose=False,
             )

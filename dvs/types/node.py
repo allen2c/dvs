@@ -33,3 +33,13 @@ class Node(pydantic.BaseModel):
 
         self.label = sanitize_xml_string(self.label)
         return self
+
+    def __hash__(self) -> int:
+        """Make Node hashable using node_id."""
+        return hash(self.node_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare Nodes based on node_id for hash consistency."""
+        if not isinstance(other, Node):
+            return NotImplemented
+        return self.node_id == other.node_id
