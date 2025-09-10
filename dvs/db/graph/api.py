@@ -272,7 +272,6 @@ class Graph:
         enhanced_results = (
             await (
                 self.dvs.db.graph.utils.perform_vector_expansion_search(
-                    dvs=self.dvs,
                     query=query,
                     top_k=top_k,
                     conn=conn,
@@ -381,21 +380,33 @@ class Graph:
         seed_entities: set[str] = {nid for (nid, _score) in important_nodes}
 
         # Use existing utils method for entity expansion (simplified)
-        expanded_entities = self.dvs.db.graph.utils.expand_entities(
-            seed_entities,
-            is_a_max_hops=2,  # Fixed 2 hops for is_a
-            is_a_limit_per_hop=10,  # Simplified limit
-            has_a_enabled=True,
-            has_a_limit_per_entity=5,  # Simplified limit
+        # Convert seed_entities from set[str] to list[NodeType]
+        seed_entity_nodes = []
+        for entity_id in seed_entities:
+            try:
+                node = self.dvs.db.graph.nodes.retrieve_or_raise(
+                    entity_id, conn=conn, verbose=False
+                )
+                seed_entity_nodes.append(node)
+            except Exception:
+                continue
+
+        expanded_entities = self.dvs.db.graph.utils.expand_entity_nodes(
+            seed_entity_nodes,
+            enable_is_a=True,
+            max_hops_is_a=2,  # Fixed 2 hops for is_a
+            per_hop_limit_is_a=10,  # Simplified limit
+            enable_has_a=True,
+            max_hops_has_a=1,
+            per_hop_limit_has_a=5,  # Simplified limit
             conn=conn,
             verbose=self.dvs.v(verbose),
         )
 
         # Step 3: Collect documents and prepare candidates
-        related_documents = self.dvs.db.graph.utils.collect_docs_via_is_from(
+        related_documents = self.dvs.db.graph.utils.get_document_nodes_from_entities(
             expanded_entities,
             per_entity_limit=3,
-            cap_entities=200,
             conn=conn,
             verbose=False,
         )
@@ -404,8 +415,8 @@ class Graph:
             logger.warning("⚠️ No related documents found, returning empty results")
             return []
 
-        candidate_points = self.dvs.db.graph.utils.gather_points_for_documents(
-            list(related_documents)[:30],
+        candidate_points = self.dvs.db.graph.utils.points_for_documents(
+            related_documents[:30],
             per_doc_limit=5,
             with_embedding=True,
             conn=conn,
@@ -440,8 +451,8 @@ class Graph:
                             doc.document_id, conn=conn, verbose=False
                         )
                         neighbors = self.dvs.db.graph.utils.get_neighbors(
-                            from_node_id_or_label=node_id,
-                            to_node_id_or_label=doc_node.node_id,
+                            from_=node_id,
+                            to=doc_node.node_id,
                             relation=RelationIsFrom,
                             limit=1,
                             conn=conn,
@@ -536,7 +547,6 @@ class Graph:
         baseline_results = (
             await (
                 self.dvs.db.graph.utils.perform_vector_expansion_search(
-                    dvs=self.dvs,
                     query=query,
                     top_k=top_k,
                     conn=conn,
@@ -582,36 +592,37 @@ class Graph:
             seed_doc_ids = [doc.document_id for _, doc, _ in best_results]
 
             # Get entities from current best documents
-            entity_ids = (
-                self.dvs.db.graph.utils.collect_entities_via_is_from_for_documents(
-                    seed_doc_ids,
-                    limit_per_doc=50,
-                    conn=conn,
-                    verbose=False,
-                )
+            entity_ids = self.dvs.db.graph.utils.get_entity_nodes_from_documents(
+                seed_doc_ids,
+                per_document_limit=50,
+                conn=conn,
+                verbose=False,
             )
 
             # Expand entities using existing utility
-            expanded_entities = self.dvs.db.graph.utils.expand_entities(
+            expanded_entities = self.dvs.db.graph.utils.expand_entity_nodes(
                 entity_ids,
-                is_a_max_hops=is_a_max_hops,
-                is_a_limit_per_hop=is_a_limit_per_hop,
-                has_a_enabled=has_a_enabled,
-                has_a_limit_per_entity=has_a_limit_per_entity,
+                enable_is_a=True,
+                max_hops_is_a=is_a_max_hops,
+                per_hop_limit_is_a=is_a_limit_per_hop,
+                enable_has_a=has_a_enabled,
+                max_hops_has_a=1,
+                per_hop_limit_has_a=has_a_limit_per_entity,
                 conn=conn,
                 verbose=False,
             )
 
             # Get new documents from expanded entities
-            graph_doc_ids = self.dvs.db.graph.utils.collect_docs_via_is_from(
+            graph_doc_ids = self.dvs.db.graph.utils.get_document_nodes_from_entities(
                 expanded_entities,
                 per_entity_limit=5,
-                cap_entities=100,
                 conn=conn,
                 verbose=False,
             )
 
-            new_docs = graph_doc_ids.difference(set(seed_doc_ids))
+            new_docs = set(doc.node_id for doc in graph_doc_ids).difference(
+                set(seed_doc_ids)
+            )
             if not new_docs:
                 if self.dvs.v(verbose):
                     logger.info("[Iterative] No new documents from graph, stopping")
@@ -622,7 +633,6 @@ class Graph:
             expanded_results: list[tuple[Point, Document, float]] = []
             for exp_query in expanded_queries:
                 results = await self.dvs.db.graph.utils.perform_vector_expansion_search(
-                    dvs=self.dvs,
                     query=exp_query,
                     top_k=top_k,
                     conn=conn,
@@ -789,7 +799,7 @@ class Graph:
             seed_doc_ids, conn=conn, verbose=False
         ):
             neighbors = self.dvs.db.graph.utils.get_neighbors(
-                to_node_id_or_label=doc_node.node_id,
+                to=doc_node.node_id,
                 relation=RelationIsFrom,
                 limit=50,  # Simplified limit
                 conn=conn,
@@ -802,13 +812,26 @@ class Graph:
                     entity_ids.add(to_node.node_id)
 
         # Step 4: Collect candidate documents (simplified - no complex expansion)
-        candidate_doc_ids: set[str] = self.dvs.db.graph.utils.collect_docs_via_is_from(
-            entity_ids,
+        # Convert entity_ids to NodeType list first
+        entity_nodes = []
+        for entity_id in entity_ids:
+            try:
+                node = self.dvs.db.graph.nodes.retrieve_or_raise(
+                    entity_id, conn=conn, verbose=False
+                )
+                entity_nodes.append(node)
+            except Exception:
+                continue
+
+        candidate_doc_nodes = self.dvs.db.graph.utils.get_document_nodes_from_entities(
+            entity_nodes,
             per_entity_limit=5,  # Simplified limit
-            cap_entities=100,  # Simplified cap
             conn=conn,
             verbose=False,
         )
+
+        # Extract document IDs from nodes
+        candidate_doc_ids: set[str] = set(doc.node_id for doc in candidate_doc_nodes)
 
         # Remove seed documents from candidates
         candidate_doc_ids.difference_update(set(seed_doc_ids))

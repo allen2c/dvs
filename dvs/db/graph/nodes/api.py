@@ -200,6 +200,38 @@ class Nodes:
         )
         return nodes[0]
 
+    def retrieve_by_ids(
+        self,
+        ids: typing.List[typing.Text],
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> typing.List[NodeType]:
+        if not ids:
+            return []
+
+        conn = conn or self.dvs.new_connection(read_only=True)
+
+        with Timer() as timer:
+            placeholders = ", ".join(["?" for _ in ids])
+            query = textwrap.dedent(
+                f"""
+                SELECT {self.columns_expr} FROM {dvs.DVS_NODES_TABLE_NAME}
+                WHERE node_id IN ({placeholders})
+                """
+            ).strip()
+            parameters = tuple(ids)
+            result = conn.cursor().execute(query, parameters).fetchall()
+            result_dicts = [dict(zip(self.columns, row)) for row in result]
+
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Retrieving nodes with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+        return [NodeType.model_validate(row) for row in result_dicts]
+
     def retrieve_by_labels(
         self,
         labels: typing.List[typing.Text],

@@ -167,6 +167,7 @@ class Points:
         self,
         *,
         document_id: typing.Optional[typing.Text] = None,
+        document_ids: typing.Optional[typing.List[typing.Text]] = None,
         content_md5: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
         before: typing.Optional[typing.Text] = None,
@@ -183,6 +184,7 @@ class Points:
         with Timer() as timer:
             out = self._list(
                 document_id=document_id,
+                document_ids=document_ids,
                 content_md5=content_md5,
                 after=after,
                 before=before,
@@ -206,6 +208,7 @@ class Points:
         self,
         *,
         document_id: typing.Optional[typing.Text] = None,
+        document_ids: typing.Optional[typing.List[typing.Text]] = None,
         content_md5: typing.Optional[typing.Text] = None,
         after: typing.Optional[typing.Text] = None,
         before: typing.Optional[typing.Text] = None,
@@ -225,6 +228,7 @@ class Points:
         while has_more:
             points = self._list(
                 document_id=document_id,
+                document_ids=document_ids,
                 content_md5=content_md5,
                 after=current_after,
                 before=before,
@@ -281,6 +285,7 @@ class Points:
         with Timer() as timer:
             out = self._list(
                 document_id=None,
+                document_ids=None,
                 content_md5=content_md5,
                 after=None,
                 before=None,
@@ -582,6 +587,7 @@ class Points:
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         document_id: typing.Optional[typing.Text],
+        document_ids: typing.Optional[typing.List[typing.Text]],
         content_md5: typing.Optional[typing.Text],
         after: typing.Optional[typing.Text],
         before: typing.Optional[typing.Text],
@@ -605,6 +611,11 @@ class Points:
         if document_id is not None:
             where_clauses.append("document_id = ?")
             parameters.append(document_id)
+        elif document_ids is not None:
+            _placeholders = ", ".join(["?" for _ in document_ids])
+            where_clauses.append(f"document_id IN ( {_placeholders} )")
+            parameters.extend(document_ids)
+
         if content_md5 is not None:
             where_clauses.append("content_md5 = ?")
             parameters.append(content_md5)
@@ -623,6 +634,19 @@ class Points:
 
         fetch_limit = limit + 1
         query += f"LIMIT {fetch_limit}"
+
+        print()
+        print()
+        print("query")
+        print(query)
+        print()
+        print()
+        print("parameters")
+        print(parameters)
+        print()
+        print()
+        print()
+        print()
 
         with Timer() as timer:
             conn = conn or self.dvs.new_connection(read_only=True)

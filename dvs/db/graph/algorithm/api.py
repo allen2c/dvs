@@ -27,8 +27,8 @@ class Algorithm:
 
     def get_shortest_paths(
         self,
-        from_node_id_or_label: str | None = None,
-        to_node_id_or_label: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType | None = None,
@@ -66,15 +66,9 @@ class Algorithm:
 
         with Timer() as timer:
             from_condition = (
-                f" WHERE {FROM_NODE_ALIAS}.node_id = '{from_node_id_or_label}'"
-                if from_node_id_or_label
-                else ""
+                f" WHERE {FROM_NODE_ALIAS}.node_id = '{from_}'" if from_ else ""
             )
-            to_condition = (
-                f" WHERE {TO_NODE_ALIAS}.node_id = '{to_node_id_or_label}'"
-                if to_node_id_or_label
-                else ""
-            )
+            to_condition = f" WHERE {TO_NODE_ALIAS}.node_id = '{to}'" if to else ""
             queries = [
                 textwrap.dedent(
                     f"""

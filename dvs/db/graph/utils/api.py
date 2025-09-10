@@ -1,10 +1,12 @@
 # dvs/db/graph/utils/api.py
+import concurrent.futures
 import logging
 import textwrap
 import typing
 from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
+import pydantic
 
 import dvs
 from dvs.types.document import Document
@@ -24,6 +26,17 @@ from dvs.utils.timer import Timer
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_IS_A_HOPS = 10
+DEFAULT_IS_A_PER_HOP_LIMIT = 20
+DEFAULT_IS_A_MAX_ENTITIES = 100
+DEFAULT_HAS_A_HOPS = 1
+DEFAULT_HAS_A_PER_HOP_LIMIT = 20
+DEFAULT_HAS_A_MAX_ENTITIES = 100
+DEFAULT_RELATED_TO_HOPS = 1
+DEFAULT_RELATED_TO_PER_HOP_LIMIT = 20
+DEFAULT_RELATED_TO_MAX_ENTITIES = 100
+
+
 class Utils:
     def __init__(self, dvs: dvs.DVS):
         """Graph utils API"""
@@ -31,9 +44,12 @@ class Utils:
 
     def get_neighbors(
         self,
-        from_node_id_or_label: str | None = None,
-        to_node_id_or_label: str | None = None,
+        from_: str | None = None,  # From node ID
+        to: str | None = None,  # To node ID
         *,
+        any_direction: bool = False,
+        from_kind: typing.Literal["entity", "document"] | None = None,
+        to_kind: typing.Literal["entity", "document"] | None = None,
         conn: duckdb.DuckDBPyConnection | None = None,
         relation: RelationType | None = None,
         limit: int = 5,
@@ -68,22 +84,32 @@ class Utils:
             ]
 
         with Timer() as timer:
-            from_condition = (
-                f" WHERE {FROM_NODE_ALIAS}.node_id = '{from_node_id_or_label}'"
-                if from_node_id_or_label
-                else ""
+            from_clauses = []
+            to_clauses = []
+            if from_ is not None:
+                from_clauses.append(f"{FROM_NODE_ALIAS}.node_id = '{from_}'")
+            if to is not None:
+                to_clauses.append(f"{TO_NODE_ALIAS}.node_id = '{to}'")
+            if from_kind is not None:
+                from_clauses.append(f"{FROM_NODE_ALIAS}.kind = '{from_kind}'")
+            if to_kind is not None:
+                to_clauses.append(f"{TO_NODE_ALIAS}.kind = '{to_kind}'")
+            from_clause = (
+                (" WHERE " + " AND ".join(from_clauses)) if from_clauses else ""
             )
-            to_condition = (
-                f" WHERE {TO_NODE_ALIAS}.node_id = '{to_node_id_or_label}'"
-                if to_node_id_or_label
-                else ""
-            )
+            to_clause = (" WHERE " + " AND ".join(to_clauses)) if to_clauses else ""
+
             queries = [
                 textwrap.dedent(
                     f"""
                     FROM GRAPH_TABLE (
                         {dvs.DVS_GRAPH_TABLE_NAME}
-                        MATCH ({FROM_NODE_ALIAS}:nodes{from_condition})-[{RELATION_ALIAS}:{query_relation}]->({TO_NODE_ALIAS}:nodes{to_condition})
+                        MATCH
+                            (
+                                {FROM_NODE_ALIAS}:nodes{from_clause}
+                            )-[{RELATION_ALIAS}:{query_relation}]{'-' if any_direction is True else '->'}(
+                                {TO_NODE_ALIAS}:nodes{to_clause}
+                            )
                         COLUMNS ({FROM_NODE_ALIAS}, {RELATION_ALIAS}, {TO_NODE_ALIAS})
                     )
                     ORDER BY {FROM_NODE_ALIAS}.node_id
@@ -106,213 +132,206 @@ class Utils:
         )
         return output
 
-    def expand_is_a_bfs(
+    def walk_neighbors(
         self,
-        seed_entities: set[str],
+        seed_entities: typing.List[NodeType],
+        *,
+        relation: RelationType,
         max_hops: int,
         per_hop_limit: int,
-        *,
-        cap_total: int | None = None,
+        max_entities: int,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
-    ) -> set[str]:
-        """Expand entities via is_a in both directions using BFS."""
+    ) -> typing.List[NodeType]:
+        """Walk neighbors of entities."""
         if max_hops <= 0 or not seed_entities:
-            return set(seed_entities)
+            return seed_entities
 
-        expanded: set[str] = set(seed_entities)
-        frontier: set[str] = set(seed_entities)
-        visited: set[str] = set(seed_entities)
+        expanded: set[NodeType] = set(seed_entities)
+        frontier: set[NodeType] = set(seed_entities)
+        visited: set[NodeType] = set(seed_entities)
 
         for _ in range(max_hops):
             if not frontier:
                 break
-            next_frontier: set[str] = set()
-            for entity_id in list(frontier):
-                try:
-                    outs = self.get_neighbors(
-                        from_node_id_or_label=entity_id,
-                        relation=RelationIsA,
-                        limit=per_hop_limit,
-                        conn=conn,
-                        verbose=self.dvs.v(verbose),
-                    )
-                except Exception:
-                    outs = []
-                try:
-                    ins = self.get_neighbors(
-                        to_node_id_or_label=entity_id,
-                        relation=RelationIsA,
-                        limit=per_hop_limit,
-                        conn=conn,
-                        verbose=self.dvs.v(verbose),
-                    )
-                except Exception:
-                    ins = []
+            next_frontier: set[NodeType] = set()
+            for entity in list(frontier):
+                neighbors = self.get_neighbors(
+                    from_=entity.node_id,
+                    relation=relation,
+                    to_kind="entity",
+                    any_direction=True,
+                    limit=per_hop_limit,
+                    conn=conn,
+                    verbose=self.dvs.v(verbose),
+                )
 
-                for from_node, _edge, to_node in list(outs) + list(ins):
-                    other_node_id: str = (
-                        to_node.node_id
-                        if from_node.node_id == entity_id
-                        else from_node.node_id
-                    )
-                    other_is_entity: bool = (
-                        getattr(
-                            to_node if from_node.node_id == entity_id else from_node,
-                            "kind",
-                            None,
-                        )
-                        == "entity"
-                    )
-                    if other_is_entity and other_node_id not in visited:
-                        visited.add(other_node_id)
-                        expanded.add(other_node_id)
-                        next_frontier.add(other_node_id)
-                        if cap_total is not None and len(expanded) >= cap_total:
-                            return expanded
+                for _, _, to_node in neighbors:
+                    if to_node not in visited:
+                        visited.add(to_node)
+                        expanded.add(to_node)
+                        next_frontier.add(to_node)
+                        if max_entities is not None and len(expanded) >= max_entities:
+                            return list(expanded)
             frontier = next_frontier
 
-        return expanded
+        return list(expanded)
 
-    def expand_has_a_one_hop(
+    def expand_entity_nodes(
         self,
-        entity_ids: set[str],
-        per_entity_limit: int,
+        seed_entities: typing.List[NodeType],
         *,
-        cap_total: int | None = None,
+        enable_is_a: bool = True,
+        max_hops_is_a: int = DEFAULT_IS_A_HOPS,
+        per_hop_limit_is_a: int = DEFAULT_IS_A_PER_HOP_LIMIT,
+        max_entities_is_a: int = DEFAULT_IS_A_MAX_ENTITIES,
+        enable_has_a: bool = True,
+        max_hops_has_a: int = DEFAULT_HAS_A_HOPS,
+        per_hop_limit_has_a: int = DEFAULT_HAS_A_PER_HOP_LIMIT,
+        max_entities_has_a: int = DEFAULT_HAS_A_MAX_ENTITIES,
+        enable_related_to: bool = False,
+        max_hops_related_to: int = DEFAULT_RELATED_TO_HOPS,
+        per_hop_limit_related_to: int = DEFAULT_RELATED_TO_PER_HOP_LIMIT,
+        max_entities_related_to: int = DEFAULT_RELATED_TO_MAX_ENTITIES,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
-    ) -> set[str]:
-        """Expand entities via has_a one hop in both directions."""
-        if not entity_ids:
-            return set()
+    ) -> typing.List[NodeType]:
+        """Expand entities."""
+        if not seed_entities:
+            return []
 
-        expanded: set[str] = set()
-        seeds: list[str] = list(entity_ids)
-        for eid in seeds:
-            try:
-                outs = self.get_neighbors(
-                    from_node_id_or_label=eid,
-                    relation=RelationHasA,
-                    limit=per_entity_limit,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
+        NodesList = pydantic.TypeAdapter(typing.List[NodeType])
+        expanded_entities: set[NodeType] = set()
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures: list[concurrent.futures.Future[typing.List[NodeType]]] = []
+            if enable_is_a:
+                futures.append(
+                    executor.submit(
+                        self.walk_neighbors,
+                        NodesList.validate_json(NodesList.dump_json(seed_entities)),
+                        relation=RelationIsA,
+                        max_hops=max_hops_is_a,
+                        per_hop_limit=per_hop_limit_is_a,
+                        max_entities=max_entities_is_a,
+                        conn=conn,
+                        verbose=self.dvs.v(verbose),
+                    )
                 )
-            except Exception:
-                outs = []
-            try:
-                ins = self.get_neighbors(
-                    to_node_id_or_label=eid,
-                    relation=RelationHasA,
-                    limit=per_entity_limit,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
+            if enable_has_a:
+                futures.append(
+                    executor.submit(
+                        self.walk_neighbors,
+                        NodesList.validate_json(NodesList.dump_json(seed_entities)),
+                        relation=RelationHasA,
+                        max_hops=max_hops_has_a,
+                        per_hop_limit=per_hop_limit_has_a,
+                        max_entities=max_entities_has_a,
+                        conn=conn,
+                        verbose=self.dvs.v(verbose),
+                    )
                 )
-            except Exception:
-                ins = []
+            if enable_related_to:
+                futures.append(
+                    executor.submit(
+                        self.walk_neighbors,
+                        NodesList.validate_json(NodesList.dump_json(seed_entities)),
+                        relation=RelationRelatedTo,
+                        max_hops=max_hops_related_to,
+                        per_hop_limit=per_hop_limit_related_to,
+                        max_entities=max_entities_related_to,
+                        conn=conn,
+                        verbose=self.dvs.v(verbose),
+                    )
+                )
+            for future in futures:
+                expanded_entities.update(future.result())
 
-            for from_node, _edge, to_node in list(outs) + list(ins):
-                other = to_node if from_node.node_id == eid else from_node
-                if getattr(other, "kind", None) == "entity":
-                    expanded.add(other.node_id)
-                    if cap_total is not None and len(expanded) >= cap_total:
-                        return expanded
+        return list(expanded_entities)
 
-        return expanded
-
-    def collect_docs_via_is_from(
+    def get_document_nodes_from_entities(
         self,
-        entity_ids: set[str],
-        per_entity_limit: int,
+        entities: typing.List[NodeType] | typing.List[str],
+        per_entity_limit: int = 10,
         *,
-        cap_entities: int | None = None,
+        max_documents: int | None = None,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
-    ) -> set[str]:
+    ) -> typing.List[NodeType]:
         """Collect document ids reachable via is_from from entities."""
-        collected: set[str] = set()
-        if not entity_ids:
-            return collected
+        collected: typing.Set[NodeType] = set()
+        if not entities:
+            return list(collected)
 
-        processed: int = 0
-        for eid in list(entity_ids):
-            if cap_entities is not None and processed >= cap_entities:
-                break
-            processed += 1
-            try:
-                neighbors = self.get_neighbors(
-                    from_node_id_or_label=eid,
-                    relation=RelationIsFrom,
-                    limit=per_entity_limit,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
-                )
-            except Exception:
-                neighbors = []
-            for from_node, _edge, to_node in neighbors:
-                if getattr(to_node, "kind", None) == "document":
-                    collected.add(to_node.label)
-                if getattr(from_node, "kind", None) == "document":
-                    collected.add(from_node.label)
-        return collected
+        for entity in entities:
+            neighbors = self.get_neighbors(
+                from_=entity if isinstance(entity, str) else entity.node_id,
+                relation=RelationIsFrom,
+                to_kind="document",
+                limit=per_entity_limit,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
+            )
+            for _, _, to_node in neighbors:
+                collected.add(to_node)
+        return list(collected)
+
+    def get_entity_nodes_from_documents(
+        self,
+        documents: typing.List[NodeType] | typing.List[str],
+        per_document_limit: int = 10,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> typing.List[NodeType]:
+        """Collect entity nodes from documents."""
+        collected: typing.Set[NodeType] = set()
+        if not documents:
+            return list(collected)
+        for document in documents:
+            neighbors = self.get_neighbors(
+                to=document if isinstance(document, str) else document.node_id,
+                relation=RelationIsFrom,
+                from_kind="entity",
+                limit=per_document_limit,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
+            )
+            for _, _, from_node in neighbors:
+                collected.add(from_node)
+        return list(collected)
 
     def centroid_for_document(
         self,
-        doc_id: str,
+        doc: NodeType | str,
         *,
         limit_points: int = 5,
         conn: duckdb.DuckDBPyConnection | None = None,
     ) -> list[float]:
         """Compute centroid from a document's point embeddings."""
-        vectors: list[list[float]] = []
-        try:
-            pts = self.dvs.db.points.gen(
-                document_id=doc_id,
-                limit=limit_points,
-                with_embedding=True,
-                conn=conn,
-                verbose=False,
-            )
-            for p in pts:
-                if p.embedding:
-                    vectors.append(p.to_python())
-        except Exception:
-            pass
         from dvs.utils.graph_ops import mean_vector
+
+        vectors: list[list[float]] = []
+        pts = self.dvs.db.points.gen(
+            document_id=(
+                self.get_node_by_id_with_cache(doc).label
+                if isinstance(doc, str)
+                else doc.label
+            ),
+            limit=limit_points,
+            with_embedding=True,
+            conn=conn,
+            verbose=False,
+        )
+        for p in pts:
+            if p.embedding:
+                vectors.append(p.to_python())
 
         return mean_vector(vectors)
 
-    def collect_entities_via_is_from_for_documents(
+    def points_for_documents(
         self,
-        document_ids: list[str],
-        *,
-        limit_per_doc: int = 10,
-        conn: duckdb.DuckDBPyConnection | None = None,
-        verbose: bool | None = None,
-    ) -> set[str]:
-        """Collect entities connected to documents via is_from edges."""
-        entity_ids: set[str] = set()
-        for doc_node in self.dvs.db.graph.nodes.retrieve_by_labels(
-            document_ids, conn=conn, verbose=self.dvs.v(verbose)
-        ):
-            neighbors = self.get_neighbors(
-                to_node_id_or_label=doc_node.node_id,
-                relation=RelationIsFrom,
-                limit=limit_per_doc,
-                conn=conn,
-                verbose=self.dvs.v(verbose),
-            )
-            for from_node, _edge, to_node in neighbors:
-                if getattr(from_node, "kind", None) == "entity":
-                    entity_ids.add(from_node.node_id)
-                if getattr(to_node, "kind", None) == "entity":
-                    entity_ids.add(to_node.node_id)
-
-        return entity_ids
-
-    def gather_points_for_documents(
-        self,
-        document_ids: list[str] | set[str],
+        documents: typing.List[NodeType] | typing.List[str],
         *,
         per_doc_limit: int = 10,
         with_embedding: bool = True,
@@ -321,156 +340,49 @@ class Utils:
     ) -> list[Point]:
         """Gather points for documents; optionally include embeddings."""
         points: list[Point] = []
-        for doc_id in list(document_ids):
-            try:
-                pts = self.dvs.db.points.gen(
-                    document_id=doc_id,
-                    limit=per_doc_limit,
-                    with_embedding=with_embedding,
-                    conn=conn,
-                    verbose=self.dvs.v(verbose),
+        for pt in self.dvs.db.points.gen(
+            document_ids=[
+                (
+                    self.get_node_by_id_with_cache(doc).label
+                    if isinstance(doc, str)
+                    else doc.label
                 )
-                points.extend(pts)
-            except Exception:
-                continue
+                for doc in documents
+            ],
+            limit=per_doc_limit,
+            with_embedding=with_embedding,
+            conn=conn,
+            verbose=self.dvs.v(verbose),
+        ):
+            points.append(pt)
         return points
 
-    def expand_entities(
+    def get_node_by_id_with_cache(
         self,
-        seed_entities: set[str],
+        node_id: str,
         *,
-        is_a_max_hops: int = 3,
-        is_a_limit_per_hop: int = 20,
-        has_a_enabled: bool = True,
-        has_a_limit_per_entity: int = 3,
-        related_to_enabled: bool = False,
-        related_to_limit_per_entity: int = 1,
-        entity_expansion_cap: int | None = None,
-        conn: duckdb.DuckDBPyConnection | None = None,
-        verbose: bool | None = None,
-    ) -> set[str]:
-        """
-        Expand entities through multiple relation types.
-
-        Unified implementation combining entity expansion via is_a, has_a,
-        and related_to relations.
-
-        Args:
-            seed_entities: Initial set of entity IDs to expand from
-            is_a_max_hops: Maximum hops for is_a expansion (multi-hop BFS)
-            is_a_limit_per_hop: Limit per hop for is_a expansion
-            has_a_enabled: Whether to enable has_a expansion
-            has_a_limit_per_entity: Limit per entity for has_a expansion
-            related_to_enabled: Whether to enable related_to expansion
-            related_to_limit_per_entity: Limit per entity for related_to expansion
-            entity_expansion_cap: Maximum total entities to expand to (None = no limit)
-            conn: Database connection
-            verbose: Verbosity flag
-
-        Returns:
-            Expanded set of entity IDs
-        """
-        expanded_entity_ids: set[str] = set(seed_entities)
-
-        # is_a expansion (multi-hop BFS)
-        if is_a_max_hops > 0 and (
-            entity_expansion_cap is None
-            or len(expanded_entity_ids) < entity_expansion_cap
-        ):
-            expanded_entity_ids = self.expand_is_a_bfs(
-                expanded_entity_ids,
-                is_a_max_hops,
-                is_a_limit_per_hop,
-                cap_total=entity_expansion_cap,
-                conn=conn,
-                verbose=verbose,
-            )
-
-        # has_a expansion (1-hop)
-        if has_a_enabled and (
-            entity_expansion_cap is None
-            or len(expanded_entity_ids) < entity_expansion_cap
-        ):
-            expanded_entity_ids |= self.expand_has_a_one_hop(
-                expanded_entity_ids,
-                has_a_limit_per_entity,
-                cap_total=entity_expansion_cap,
-                conn=conn,
-                verbose=verbose,
-            )
-
-        # related_to expansion (1-hop)
-        if related_to_enabled and (
-            entity_expansion_cap is None
-            or len(expanded_entity_ids) < entity_expansion_cap
-        ):
-            slice_limit = (
-                entity_expansion_cap
-                if entity_expansion_cap
-                else len(expanded_entity_ids)
-            )
-            for eid in list(expanded_entity_ids)[:slice_limit]:
-                try:
-                    out_neighbors = self.get_neighbors(
-                        from_node_id_or_label=eid,
-                        relation=RelationRelatedTo,
-                        limit=related_to_limit_per_entity,
-                        conn=conn,
-                        verbose=verbose,
-                    )
-                    in_neighbors = self.get_neighbors(
-                        to_node_id_or_label=eid,
-                        relation=RelationRelatedTo,
-                        limit=related_to_limit_per_entity,
-                        conn=conn,
-                        verbose=verbose,
-                    )
-
-                    all_neighbors = list(out_neighbors) + list(in_neighbors)
-                    for from_node, _edge, to_node in all_neighbors:
-                        other = to_node if from_node.node_id == eid else from_node
-                        if getattr(other, "kind", None) == "entity":
-                            expanded_entity_ids.add(other.node_id)
-                            if (
-                                entity_expansion_cap
-                                and len(expanded_entity_ids) >= entity_expansion_cap
-                            ):
-                                break
-                    if (
-                        entity_expansion_cap
-                        and len(expanded_entity_ids) >= entity_expansion_cap
-                    ):
-                        break
-                except Exception:
-                    continue
-
-        return expanded_entity_ids
-
-    def _get_or_cache_node(
-        self,
-        doc_id: str,
-        doc_label_nodes: dict[str, "NodeType"],
-        *,
+        cache: dict[str, "NodeType"] | None = None,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> "NodeType":
         """Get node from cache or retrieve from database and cache it."""
-        if doc_id in doc_label_nodes:
-            return doc_label_nodes[doc_id]
-
-        node = self.dvs.db.graph.nodes.retrieve_by_label_or_raise(
-            doc_id, conn=conn, verbose=self.dvs.v(verbose)
+        if cache is None:
+            cache = {}
+        if node_id in cache:
+            return cache[node_id]
+        node = self.dvs.db.graph.nodes.retrieve_or_raise(
+            node_id, conn=conn, verbose=self.dvs.v(verbose)
         )
-        doc_label_nodes[doc_id] = node
+        cache[node_id] = node
         return node
 
     def calculate_graph_relevance(
         self,
         target_doc_id: str,
         original_doc_ids: list[str],
-        related_entities: set[str],
+        related_entities: list[NodeType],
         *,
-        doc_label_nodes: dict[str, "NodeType"] | None = None,
+        doc_ids_nodes: dict[str, "NodeType"] | None = None,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> float:
@@ -496,27 +408,27 @@ class Utils:
         if target_doc_id in original_doc_ids:
             return 1.0
 
-        # Create document label to node cache to avoid repeated database calls
-        doc_label_nodes = {} if doc_label_nodes is None else doc_label_nodes
+        # Create document id to node cache to avoid repeated database calls
+        doc_ids_nodes = {} if doc_ids_nodes is None else doc_ids_nodes
 
         # If no related entities provided, fall back to distance-based scoring
         if not related_entities:
             return self.calculate_distance_based_relevance(
                 target_doc_id,
                 original_doc_ids,
-                doc_label_nodes,
+                doc_ids_nodes,
                 conn=conn,
                 verbose=verbose,
             )
 
         # Calculate entity overlap score (primary algorithm)
         entity_overlap_score = self.calculate_entity_overlap_score(
-            target_doc_id, related_entities, doc_label_nodes, conn=conn, verbose=verbose
+            target_doc_id, related_entities, doc_ids_nodes, conn=conn, verbose=verbose
         )
 
         # Calculate distance score as fallback/supplement
         distance_score = self.calculate_distance_based_relevance(
-            target_doc_id, original_doc_ids, doc_label_nodes, conn=conn, verbose=verbose
+            target_doc_id, original_doc_ids, doc_ids_nodes, conn=conn, verbose=verbose
         )
 
         # Combine scores: prioritize entity overlap but include distance as baseline
@@ -527,9 +439,9 @@ class Utils:
 
     def calculate_entity_overlap_score(
         self,
-        target_doc_id: str,
-        related_entities: set[str],
-        doc_label_nodes: dict[str, "NodeType"],
+        target_doc: NodeType | str,
+        related_entities: typing.List[NodeType] | typing.List[str],
+        doc_ids_nodes: dict[str, "NodeType"],
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
@@ -540,7 +452,7 @@ class Utils:
         Args:
             target_doc_id: Target document ID
             related_entities: Set of expanded entities from graph expansion
-            doc_label_nodes: Cached mapping of document IDs to Node objects
+            doc_ids_nodes: Cached mapping of document IDs to Node objects
 
         Returns:
             Relevance score [0,1] based on entity overlap
@@ -550,23 +462,26 @@ class Utils:
 
         try:
             # Use cached node or retrieve if not available
-            target_node = self._get_or_cache_node(
-                target_doc_id, doc_label_nodes, conn=conn, verbose=verbose
+            target_node = self.get_node_by_id_with_cache(
+                target_doc if isinstance(target_doc, str) else target_doc.node_id,
+                cache=doc_ids_nodes,
+                conn=conn,
+                verbose=verbose,
             )
 
             # Find entities connected to this document via is_from relationship
             doc_entities: set[str] = set()
             neighbors = self.get_neighbors(
-                to_node_id_or_label=target_node.node_id,
+                to=target_node.node_id,
                 relation=RelationIsFrom,
+                from_kind="entity",
                 limit=50,  # Get reasonable number of connected entities
                 conn=conn,
                 verbose=False,
             )
 
             for _, _, from_node in neighbors:
-                if getattr(from_node, "kind", None) == "entity":
-                    doc_entities.add(from_node.node_id)
+                doc_entities.add(from_node.node_id)
 
             if not doc_entities:
                 return 0.1  # Document has no connected entities
@@ -592,7 +507,7 @@ class Utils:
         self,
         target_doc_id: str,
         original_doc_ids: list[str],
-        doc_label_nodes: dict[str, "NodeType"],
+        doc_ids_nodes: dict[str, "NodeType"],
         *,
         conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
@@ -603,7 +518,7 @@ class Utils:
         Args:
             target_doc_id: Target document ID
             original_doc_ids: List of original seed document IDs
-            doc_label_nodes: Cached mapping of document IDs to Node objects
+            doc_ids_nodes: Cached mapping of document IDs to Node objects
 
         Returns:
             Relevance score [0,1] based on graph distance
@@ -613,21 +528,21 @@ class Utils:
 
         try:
             # Use cached target node or retrieve if not available
-            target_node = self._get_or_cache_node(
-                target_doc_id, doc_label_nodes, conn=conn, verbose=verbose
+            target_node = self.get_node_by_id_with_cache(
+                target_doc_id, cache=doc_ids_nodes, conn=conn, verbose=verbose
             )
 
             for original_doc_id in original_doc_ids:
                 try:
                     # Use cached original node or retrieve if not available
-                    original_node = self._get_or_cache_node(
-                        original_doc_id, doc_label_nodes, conn=conn, verbose=False
+                    original_node = self.get_node_by_id_with_cache(
+                        original_doc_id, cache=doc_ids_nodes, conn=conn, verbose=False
                     )
 
                     # Calculate shortest path distance
                     paths = self.dvs.db.graph.algorithm.get_shortest_paths(
-                        from_node_id_or_label=original_node.node_id,
-                        to_node_id_or_label=target_node.node_id,
+                        from_=original_node.node_id,
+                        to=target_node.node_id,
                         limit=1,
                         conn=conn,
                         verbose=False,
@@ -653,7 +568,6 @@ class Utils:
 
     async def perform_vector_expansion_search(
         self,
-        dvs: "dvs.DVS",
         query: str,
         top_k: int,
         *,
@@ -695,15 +609,15 @@ class Utils:
         Returns:
             List of tuples: (Point, Document, combined_score)
         """
-        conn = conn or dvs.new_connection()
+        conn = conn or self.dvs.new_connection()
 
         # Vector search to find seed documents
-        initial_results = await dvs.search(
+        initial_results = await self.dvs.search(
             query=query,
             top_k=top_k * 2,
             with_embedding=True,
             conn=conn,
-            verbose=dvs.v(verbose),
+            verbose=self.dvs.v(verbose),
         )
 
         if not initial_results:
@@ -712,34 +626,41 @@ class Utils:
         document_ids = [doc.document_id for _, doc, _ in initial_results]
 
         # Entity discovery & graph expansion
-        related_entities: set[str] = set()
+        related_entities: set[NodeType] = set()
         if document_ids:
-            related_entities = self.collect_entities_via_is_from_for_documents(
-                document_ids, limit_per_doc=10, conn=conn, verbose=False
+            related_entities.update(
+                self.get_entity_nodes_from_documents(
+                    document_ids, per_document_limit=10, conn=conn, verbose=False
+                )
             )
 
         # Expand entities through multiple relations
-        expanded_entity_ids = self.expand_entities(
-            related_entities,
-            is_a_max_hops=is_a_max_hops,
-            is_a_limit_per_hop=is_a_limit_per_hop,
-            has_a_enabled=has_a_enabled,
-            has_a_limit_per_entity=has_a_limit_per_entity,
-            related_to_enabled=related_to_enabled,
-            related_to_limit_per_entity=related_to_limit_per_entity,
-            entity_expansion_cap=entity_expansion_cap,
+        expanded_entities = self.expand_entity_nodes(
+            list(related_entities),
+            enable_is_a=True,
+            max_hops_is_a=is_a_max_hops,
+            per_hop_limit_is_a=is_a_limit_per_hop,
+            max_entities_is_a=entity_expansion_cap,
+            enable_has_a=has_a_enabled,
+            max_hops_has_a=has_a_limit_per_entity,
+            per_hop_limit_has_a=has_a_limit_per_entity,
+            max_entities_has_a=entity_expansion_cap,
+            enable_related_to=related_to_enabled,
+            max_hops_related_to=related_to_limit_per_entity,
+            per_hop_limit_related_to=related_to_limit_per_entity,
+            max_entities_related_to=entity_expansion_cap,
             conn=conn,
             verbose=verbose,
         )
 
         # Cache document nodes
-        doc_label_nodes: dict[str, "NodeType"] = {}
+        doc_ids_nodes: dict[str, "NodeType"] = {}
         all_doc_ids = set(document_ids)
-        for doc_node in dvs.db.graph.nodes.retrieve_by_labels(
+        for doc_node in self.dvs.db.graph.nodes.retrieve_by_ids(
             list(all_doc_ids), conn=conn, verbose=False
         ):
-            if doc_node.node_id not in doc_label_nodes:
-                doc_label_nodes[doc_node.node_id] = doc_node
+            if doc_node.node_id not in doc_ids_nodes:
+                doc_ids_nodes[doc_node.node_id] = doc_node
 
         # Calculate combined scores
         enhanced_results: list[tuple["Point", "Document", float]] = []
@@ -748,8 +669,8 @@ class Utils:
                 graph_score: float = self.calculate_graph_relevance(
                     doc.document_id,
                     document_ids,
-                    expanded_entity_ids,
-                    doc_label_nodes=doc_label_nodes,
+                    list(expanded_entities),
+                    doc_ids_nodes=doc_ids_nodes,
                     conn=conn,
                     verbose=False,
                 )

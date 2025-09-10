@@ -58,7 +58,7 @@ class DVS:
     def new_connection(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
         """Always use a new duckdb connection."""
         conn = duckdb.connect(self.duckdb_path, read_only=read_only)
-        if self.enable_graph:
+        if self.enable_graph and not read_only:
             from dvs.utils.sql_stmts import SQL_STMT_LOAD_DUCKPGQ
 
             conn.execute(SQL_STMT_LOAD_DUCKPGQ)
