@@ -176,3 +176,55 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 If you encounter any issues or have questions, please [open an issue](https://github.com/allen2c/dvs/issues) on GitHub.
+
+## GraphRAG Strategies (Overview)
+
+Below is a concise overview of four GraphRAG strategies used in `dvs`. Each diagram mirrors the inline docstrings to aid quick understanding.
+
+### Strategy 1: Vector Expansion
+
+- High-level: Vector expansion search and ranking.
+
+```mermaid
+flowchart TD
+    Q[Query] --> Expand[perform_vector_expansion_search]
+    Expand --> Rank[Rank and Format]
+    Rank --> TopK[Top-k Results]
+```
+
+### Strategy 2: Graph-Guided
+
+- High-level: PageRank-guided candidate expansion and ranking.
+
+```mermaid
+flowchart TD
+    Q[Query] --> PR[PageRank RelatedTo]
+    PR --> Expand[Expand and Collect]
+    Expand --> Score[Score and Rank]
+    Score --> TopK[Top-k Results]
+```
+
+### Strategy 3: Iterative Refinement
+
+- High-level: Iterate baseline + LLM expansions until no improvement.
+
+```mermaid
+flowchart TD
+    Q[Query] --> Base[Baseline Vector Expansion]
+    Base --> Loop{Improved}
+    Loop -- Yes --> LLM[LLM Query Expand]
+    LLM --> Refine[Refined Vector Expansion]
+    Refine --> Loop
+    Loop -- No --> TopK[Top-k Results]
+```
+
+### Strategy 4: Context-Aware
+
+- High-level: Baseline search with context-aware scoring and filtering.
+
+```mermaid
+flowchart TD
+    Q[Query] --> Base[Baseline Search]
+    Base --> Score[Context-Aware Score and Filter]
+    Score --> TopK[Top-k Results]
+```

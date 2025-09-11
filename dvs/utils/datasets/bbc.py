@@ -22,6 +22,7 @@ def download_documents(
     target_dirpath: typing.Text | pathlib.Path = CACHE_DIR,
     overwrite: typing.Optional[bool] = None,
 ) -> typing.List[Document]:
+    """Download and parse BBC news dataset into Document objects."""
     download_dirpath = pathlib.Path(download_dirpath).resolve()
     download_dirpath.mkdir(parents=True, exist_ok=True)
     target_dirpath = pathlib.Path(target_dirpath).resolve()
@@ -47,6 +48,7 @@ def download_bbc_news_dataset(
     download_dirpath: typing.Text | pathlib.Path = TEMP_DIR,
     overwrite: typing.Optional[bool] = None,
 ) -> pathlib.Path:
+    """Download BBC news dataset zip file from remote URL."""
     download_filepath = pathlib.Path(download_dirpath) / "bbc-fulltext.zip"
     if download_filepath.exists():
         if overwrite is None:
@@ -81,6 +83,7 @@ def download_bbc_news_dataset(
 def unzip_bbc_news_dataset(
     zip_path: pathlib.Path, target_dirpath: typing.Text | pathlib.Path = CACHE_DIR
 ) -> pathlib.Path:
+    """Extract BBC news dataset from zip file to target directory."""
     target_dirpath = pathlib.Path(target_dirpath).resolve()
     target_dirpath.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
@@ -91,12 +94,14 @@ def unzip_bbc_news_dataset(
 def walk_bbc_news_dataset(
     root_dir: pathlib.Path,
 ) -> typing.Generator[pathlib.Path, None, None]:
+    """Walk through BBC news dataset directory and yield file paths."""
     for path in root_dir.glob("**/*"):
         if path.is_file():
             yield path
 
 
 def parse_bbc_news_document(filepath: pathlib.Path) -> Document:
+    """Parse individual BBC news file into Document object."""
     with open(filepath, "r", encoding="utf-8") as file:
         content = file.read().strip()
     return Document.model_validate(

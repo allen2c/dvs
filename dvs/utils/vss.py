@@ -13,7 +13,9 @@ from dvs.types.columns import (
 )
 from dvs.types.document import Document
 from dvs.types.point import Point
-from dvs.utils.display import DISPLAY_SQL_QUERY
+from dvs.utils.debug_print import debug_print
+from dvs.utils.display import DISPLAY_SQL_PARAMS, display_sql_parameters
+from dvs.utils.timer import Timer
 
 
 async def vector_search(
@@ -79,15 +81,18 @@ async def vector_search(
         points_table_name=points_table_name,
     )
     params = [vector]
-    if debug and console:
-        console.print(
-            "\nPerforming vector similarity search with SQL:\n"
-            + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-        )
 
     # Fetch results
-    result = await asyncio.to_thread(conn.execute, query, params)
-    fetchall_result = await asyncio.to_thread(result.fetchall)
+    with Timer() as timer:
+        result = await asyncio.to_thread(conn.execute, query, params)
+        fetchall_result = await asyncio.to_thread(result.fetchall)
+
+    debug_print(
+        f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(params))}",
+        title="Performing vector similarity search with SQL:",
+        footer=f"Duration: {timer.duration * 1000:.3f} ms",
+        verbose=debug,
+    )
 
     # Convert to output format
     assert result.description is not None

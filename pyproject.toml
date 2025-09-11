@@ -7,25 +7,32 @@ name = "dvs-py"
 packages = [{ include = "dvs" }]
 readme = "README.md"
 repository = "https://github.com/allen2c/dvs"
-version = "1.1.0"
+version = "2.0.0"
 
 [tool.poetry.dependencies]
-chunkle = "*"
+aps-agent = { version = ">=0.2.0,<1", optional = true }
+cachetic = ">=0.4.1"
+chunkle = ">=0.3.0"
 diskcache = "*"
 duckdb = "^1"
 logging-bullet-train = "*"
+ner-agent = { version = ">=0.4.0,<1", optional = true }
+networkx = "^3"
 numpy = "^2"
 openai = "^1"
 openai-embeddings-model = ">=0.3.0,<1"
 pydantic = "^2"
 pydantic-settings = "*"
 python = ">=3.11,<4"
+rich-color-support = "*"
+scikit-learn = { version = ">=1.5", optional = true }
 str-or-none = "*"
 tiktoken = "*"
 uuid-utils = "*"
 
 [tool.poetry.extras]
 all = []
+graph = ["aps-agent", "ner-agent", "networkx", "scikit-learn"]
 
 [tool.poetry.group.docs.dependencies]
 mkdocs-git-authors-plugin = "*"
@@ -39,12 +46,16 @@ mkdocs-render-swagger-plugin = "*"
 neoteroi-mkdocs = "*"
 
 [tool.poetry.group.dev.dependencies]
+aps-agent = "*"
 black = { extras = ["jupyter"], version = "*" }
 codepress = "*"
 faker = "*"
 isort = "*"
 matplotlib = "*"
+ner-agent = "*"
+networkx = "*"
 pandas = "*"
+plotly = "*"
 poetry-plugin-export = "*"
 pytest = "^8"
 pytest-asyncio = "*"
@@ -52,9 +63,9 @@ pytest-cov = "*"
 pytest-env = "*"
 pytest-xdist = "*"
 rich = "*"
+scikit-learn = "*"
 scipy = "*"
 setuptools = ">=69"
-
 
 [tool.isort]
 profile = "black"
@@ -62,7 +73,6 @@ profile = "black"
 [tool.flake8]
 ignore = ["E203", "E704", "W503"]
 max-line-length = 88
-
 
 [build-system]
 build-backend = "poetry.core.masonry.api"

@@ -8,6 +8,7 @@ def download_documents(
     *,
     overwrite: Optional[bool] = None,
 ) -> List[Document]:
+    """Download and return documents from specified dataset."""
     if name == "bbc":
         import dvs.utils.datasets.bbc
 

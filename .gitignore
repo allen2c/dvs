@@ -1,5 +1,6 @@
 # Custom
 .cache
+.envrc
 cache/
 data
 poetry.lock

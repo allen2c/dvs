@@ -107,20 +107,15 @@ class Document(pydantic.BaseModel):
         *,
         name: typing.Optional[typing.Text] = None,
         metadata: typing.Optional[typing.Dict[typing.Text, typing.Any]] = None,
+        encoding: typing.Optional["tiktoken.Encoding"] = None,
     ) -> "Document":
-        _content = str_or_none(content)
-        if _content is None:
-            raise ValueError("Content is required")
-        sanitized_content = _content
-        content_md5 = cls.hash_content(sanitized_content)
-        metadata = metadata or {}
-        name = name or sanitized_content.strip().split("\n\n")[0][:36]
         doc = cls(
-            name=name,
-            content=sanitized_content,
-            content_md5=content_md5,
-            metadata=metadata,
+            name=name or "",
+            content=content,
+            content_md5=cls.hash_content(content),
+            metadata=json.loads(json.dumps(metadata or {}, default=str)),  # type: ignore  # noqa: E501
         )
+        doc.sanitize(encoding=encoding)
         return doc
 
     @classmethod
@@ -133,6 +128,8 @@ class Document(pydantic.BaseModel):
             typing.Iterable[str],
             typing.Iterable[typing.Union["Document", str]],
         ],
+        *,
+        encoding: typing.Optional["tiktoken.Encoding"] = None,
     ) -> typing.List["Document"]:
         """
         Create documents from the contents.
@@ -147,22 +144,20 @@ class Document(pydantic.BaseModel):
                 doc = str_or_none(doc)
                 if not doc:
                     raise ValueError(f"Document [{idx}] content cannot be empty: {doc}")
-                doc = Document.model_validate(
-                    {
-                        "name": doc.split("\n")[0][:28],
-                        "content": doc,
-                        "content_md5": Document.hash_content(doc),
-                        "metadata": {
-                            "content_length": len(doc),
-                        },
-                        "created_at": int(time.time()),
-                        "updated_at": int(time.time()),
-                    }
+                doc = Document.from_content(
+                    doc, metadata={"content_length": len(doc)}, encoding=encoding
                 )
 
-            docs.append(doc.sanitize())
+            docs.append(doc)
 
         return docs
+
+    @pydantic.model_validator(mode="after")
+    def validate_string_fields(self) -> typing.Self:
+        """
+        Validate the string fields of the document.
+        """
+        return self.sanitize()
 
     def to_point_with_content(
         self,
@@ -229,6 +224,7 @@ class Document(pydantic.BaseModel):
                 update={
                     "document_id": dvs.utils.ids.get_id("doc"),
                     "content": chunk,
+                    "source_id": self.source_id,
                     "chunk_index": chunk_idx,
                 },
                 deep=True,
@@ -263,10 +259,10 @@ class Document(pydantic.BaseModel):
 
         # Validate name
         sanitized_name = str_or_none(self.name)
-        if sanitized_name is None:
-            self.name = sanitized_content.strip().split("\n\n")[0][:36]
-        else:
+        if sanitized_name:
             self.name = sanitized_name
+        else:
+            self.name = sanitized_content.strip().split("\n\n")[0][:36]
 
         if refresh:
             self.updated_at = int(time.time())
@@ -276,9 +272,12 @@ class Document(pydantic.BaseModel):
 
         return self
 
-    @pydantic.model_validator(mode="after")
-    def validate_string_fields(self) -> typing.Self:
-        """
-        Validate the string fields of the document.
-        """
-        return self.sanitize()
+    def __hash__(self) -> int:
+        """Make Document hashable using document_id."""
+        return hash(self.document_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare Documents based on document_id for hash consistency."""
+        if not isinstance(other, Document):
+            return NotImplemented
+        return self.document_id == other.document_id

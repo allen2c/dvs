@@ -10,9 +10,15 @@ if typing.TYPE_CHECKING:
     import rich.console
 
 
-MANIFEST_TABLE_NAME = "manifest"
-POINTS_TABLE_NAME = "points"
-DOCUMENTS_TABLE_NAME = "documents"
+DVS_MANIFEST_TABLE_NAME = "manifest"
+DVS_POINTS_TABLE_NAME = "points"
+DVS_DOCUMENTS_TABLE_NAME = "documents"
+DVS_NODES_TABLE_NAME = "nodes"
+DVS_EDGES_IS_A_TABLE_NAME = "edges_is_a"
+DVS_EDGES_HAS_A_TABLE_NAME = "edges_has_a"
+DVS_EDGES_RELATED_TO_TABLE_NAME = "edges_related_to"
+DVS_EDGES_IS_FROM_TABLE_NAME = "edges_is_from"
+DVS_GRAPH_TABLE_NAME = "knowledge_graph"
 
 CACHE_DIR = pathlib.Path("./cache/dvs")
 TEMP_DIR = CACHE_DIR.joinpath("tmp")
@@ -31,14 +37,17 @@ class Settings(pydantic_settings.BaseSettings):
 
     @property
     def duckdb_conn(self) -> duckdb.DuckDBPyConnection:
+        """Get a DuckDB connection to the database."""
         return duckdb.connect(self.DUCKDB_PATH)
 
     @property
     def duckdb_path(self) -> pathlib.Path:
+        """Get the path to the DuckDB database file."""
         return pathlib.Path(self.DUCKDB_PATH)
 
     @functools.cached_property
     def console(self) -> "rich.console.Console":
+        """Get a Rich console for formatted output."""
         import rich.console
 
         return rich.console.Console()

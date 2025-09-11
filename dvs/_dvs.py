@@ -21,6 +21,7 @@ if typing.TYPE_CHECKING:
     from dvs.db.api import DB
     from dvs.tokens import Tokens
     from dvs.types.manifest import Manifest as ManifestType
+    from dvs.utils.api import Utils
 
 
 logger = logging.getLogger(__name__)
@@ -33,29 +34,35 @@ class DVS:
         *,
         model_settings: oai_emb_model.ModelSettings | None = None,
         model: oai_emb_model.OpenAIEmbeddingsModel | str,
+        enable_graph: bool = False,
         verbose: bool | None = None,
     ):
-        self.settings = self._ensure_dvs_settings(settings)
+        self.settings = self.ensure_dvs_settings(settings)
         self.verbose = verbose or False
-        self.model = self._ensure_model(model)
+        self.model = self.ensure_model(model)
         self.model_settings = model_settings or oai_emb_model.ModelSettings()
+        self.enable_graph = enable_graph
 
-        self.db_manifest = self._ensure_manifest(
-            self.model, self.model_settings, verbose=self.verbose
+        # Init database resources
+        self.db_manifest = self.ensure_manifest(
+            self.model, self.model_settings, verbose=self.v(verbose)
         )
 
-        self.db.touch(verbose=self.verbose)
+        self.db.touch(enable_graph=self.enable_graph, verbose=self.verbose)
 
     @property
     def duckdb_path(self) -> pathlib.Path:
+        """Get the path to the DuckDB database file."""
         return self.settings.duckdb_path
 
-    @property
-    def conn(self) -> duckdb.DuckDBPyConnection:
-        """
-        Always open a new duckdb connection.
-        """
-        return duckdb.connect(self.duckdb_path)
+    def new_connection(self, read_only: bool = False) -> duckdb.DuckDBPyConnection:
+        """Always use a new duckdb connection."""
+        conn = duckdb.connect(self.duckdb_path, read_only=read_only)
+        if self.enable_graph and not read_only:
+            from dvs.utils.sql_stmts import SQL_STMT_LOAD_DUCKPGQ
+
+            conn.execute(SQL_STMT_LOAD_DUCKPGQ)
+        return conn
 
     def add(
         self,
@@ -69,19 +76,11 @@ class DVS:
         *,
         batch_size: int = 100,
         ignore_same_content: bool = True,
-        lines_per_chunk: int = 20,
-        tokens_per_chunk: int = 500,
+        lines_per_chunk: int = 80,
+        tokens_per_chunk: int = 1200,
         verbose: bool | None = None,
-        very_verbose: bool | None = None,
     ) -> typing.Dict:
-        """
-        Add one or more documents to the vector similarity search database.
-        Processes documents, generates embeddings via OpenAI API, and stores in DuckDB.
-        Returns dict with creation stats and ignores duplicates if ignore_same_content=True.
-        """  # noqa: E501
-
-        verbose = self.verbose if verbose is None else verbose
-        very_verbose = True if very_verbose else False
+        """Add docs: chunk, embed, and store in DuckDB; return creation stats."""
 
         # Validate documents
         docs: list["Document"] = Document.from_contents(documents)
@@ -92,7 +91,10 @@ class DVS:
         chunked_docs = [
             chunked_doc
             for doc in tqdm(
-                docs, total=len(docs), disable=not verbose, desc="Chunking documents"
+                docs,
+                total=len(docs),
+                disable=not self.v(verbose),
+                desc="Chunking documents",
             )
             for chunked_doc in doc.to_chunked_documents(
                 lines_per_chunk=lines_per_chunk,
@@ -111,11 +113,10 @@ class DVS:
         ):
             if ignore_same_content:
                 if self.db.documents.content_exists(doc.content_md5, verbose=False):
-                    if very_verbose:
-                        logger.debug(
-                            f"Document {repr(doc.name)[:12]} with content_md5 "
-                            + f"'{doc.content_md5}' already exists, skipping creation"
-                        )
+                    logger.warning(
+                        f"Document {repr(doc.name)[:12]} with content_md5 "
+                        + f"'{doc.content_md5}' already exists, skipping creation"
+                    )
                     ignored_docs_indexes.append(idx)
                     continue
         creating_docs = [
@@ -159,17 +160,12 @@ class DVS:
         *,
         verbose: bool | None = None,
     ) -> None:
-        """
-        Remove one or more documents and their associated vector points from the database.
-        Accepts single document ID or iterable of IDs and deletes both documents and points.
-        Operation is irreversible and raises NotFoundError if document ID doesn't exist.
-        """  # noqa: E501
-        verbose = self.verbose if verbose is None else verbose
+        """Remove documents and their points by IDs; irreversible if executed."""
         doc_ids = [doc_ids] if isinstance(doc_ids, str) else list(doc_ids)
 
-        self.db.points.remove_many(document_ids=doc_ids, verbose=verbose)
+        self.db.points.remove_many(document_ids=doc_ids, verbose=self.v(verbose))
         for doc_id in doc_ids:
-            self.db.documents.remove(doc_id, verbose=verbose)
+            self.db.documents.remove(doc_id, verbose=self.v(verbose))
 
         return None
 
@@ -178,6 +174,7 @@ class DVS:
         query: str,
         top_k: int = 3,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         with_embedding: bool = False,
         verbose: bool | None = None,
     ) -> list[tuple["Point", "Document", float]]:
@@ -186,8 +183,6 @@ class DVS:
         Converts query to embedding via OpenAI API and searches DuckDB using cosine similarity.
         Returns list of tuples containing matched point, document, and relevance score.
         """  # noqa: E501
-
-        verbose = self.verbose if verbose is None else verbose
 
         sanitized_query = str_or_none(query)
         if sanitized_query is None:
@@ -209,10 +204,11 @@ class DVS:
             vector=vector,
             top_k=search_req.top_k,
             embedding_dimensions=self.db_manifest.embedding_dimensions,
-            documents_table_name=dvs.DOCUMENTS_TABLE_NAME,
-            points_table_name=dvs.POINTS_TABLE_NAME,
-            conn=self.conn,
+            documents_table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
+            points_table_name=dvs.DVS_POINTS_TABLE_NAME,
+            conn=conn or self.new_connection(read_only=True),
             with_embedding=search_req.with_embedding,
+            debug=self.v(verbose),
             console=self.settings.console,
         )
 
@@ -230,9 +226,20 @@ class DVS:
 
         return Tokens(self)
 
-    def _ensure_dvs_settings(
+    @functools.cached_property
+    def utils(self) -> "Utils":
+        from dvs.utils.api import Utils
+
+        return Utils(self)
+
+    def v(self, verbose: bool | None = None) -> bool:
+        """Get verbosity setting, with optional override."""
+        return self.verbose if verbose is None else verbose
+
+    def ensure_dvs_settings(
         self, settings: typing.Union[pathlib.Path, str] | Settings
     ) -> Settings:
+        """Ensure DVS settings are properly configured and validated."""
         if isinstance(settings, Settings):
             pass
         else:
@@ -243,9 +250,10 @@ class DVS:
 
         return settings
 
-    def _ensure_model(
+    def ensure_model(
         self, model: oai_emb_model.OpenAIEmbeddingsModel | str
     ) -> oai_emb_model.OpenAIEmbeddingsModel:
+        """Ensure OpenAI embeddings model is properly initialized."""
         if isinstance(model, oai_emb_model.OpenAIEmbeddingsModel):
             return model
         else:
@@ -253,7 +261,7 @@ class DVS:
                 model, openai.OpenAI(), cache=oai_emb_model.get_default_cache()
             )
 
-    def _ensure_manifest(
+    def ensure_manifest(
         self,
         model: oai_emb_model.OpenAIEmbeddingsModel,
         model_settings: oai_emb_model.ModelSettings,
@@ -267,7 +275,7 @@ class DVS:
         from dvs.types.manifest import Manifest as ManifestType
 
         # Ensure the manifest table exists
-        if dvs.MANIFEST_TABLE_NAME not in self.db.show_table_names():
+        if dvs.DVS_MANIFEST_TABLE_NAME not in self.db.show_table_names():
             logger.debug("Manifest table does not exist, creating it")
             self.db.manifest.touch(verbose=verbose)
 

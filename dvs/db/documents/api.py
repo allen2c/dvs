@@ -11,11 +11,8 @@ import dvs
 import dvs.utils.openapi as openapi_utils
 from dvs.types.document import Document as DocumentType
 from dvs.types.paginations import Pagination
-from dvs.utils.display import (
-    DISPLAY_SQL_PARAMS,
-    DISPLAY_SQL_QUERY,
-    display_sql_parameters,
-)
+from dvs.utils.debug_print import debug_print
+from dvs.utils.display import DISPLAY_SQL_PARAMS, display_sql_parameters
 from dvs.utils.dummies import dummy_httpx_response
 from dvs.utils.sql_stmts import SQL_STMT_DROP_TABLE
 from dvs.utils.timer import Timer
@@ -25,32 +22,44 @@ logger = logging.getLogger(__name__)
 
 class Documents:
     def __init__(self, dvs: dvs.DVS):
+        """Initialize documents API with DVS instance."""
         self.dvs = dvs
 
-    def touch(self, *, verbose: bool | None = None) -> bool:
+    def touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Ensure the existence of the documents table in the DuckDB database.
         Creates the table if it doesn't exist, installs necessary extensions.
         """
         with Timer() as timer:
-            self._touch(verbose=verbose)
+            self._touch(conn=conn, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
-            logger.debug(f"Created table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Created table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
+            )
 
         return True
 
     def retrieve(
-        self, document_id: typing.Text, *, verbose: bool | None = None
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
         Raises NotFoundError if the document doesn't exist.
         """
         with Timer() as timer:
-            out = self._retrieve(document_id, verbose=verbose)
-        if verbose:
+            out = self._retrieve(document_id, conn=conn, verbose=self.dvs.v(verbose))
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Retrieved document: '{document_id}' in {dur:.3f} ms")
         return out
@@ -59,17 +68,17 @@ class Documents:
         self,
         document: typing.Union[DocumentType, typing.Dict],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> DocumentType:
         """
         Create a single document in the DuckDB database.
         Accepts either a Document instance or a dictionary.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
-            docs = self.bulk_create([document], verbose=verbose)
+            docs = self.bulk_create([document], conn=conn, verbose=self.dvs.v(verbose))
         doc = docs[0]
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Created document: '{doc.document_id}' in {dur:.3f} ms")
         return doc
@@ -82,6 +91,7 @@ class Documents:
             typing.Sequence[typing.Union[DocumentType, typing.Dict]],
         ],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.List[DocumentType]:
         """
@@ -97,9 +107,9 @@ class Documents:
                 )
                 for doc in documents
             ]
-            self._bulk_create(documents, verbose=verbose)
+            self._bulk_create(documents, conn=conn, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur, unit = (
                 (timer.duration, "s")
                 if timer.duration > 1.0
@@ -109,16 +119,21 @@ class Documents:
 
         return documents
 
-    def remove(self, document_id: typing.Text, *, verbose: bool | None = None) -> None:
+    def remove(
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> None:
         """
         Remove a document from the DuckDB database by its ID.
         Uses parameterized queries to prevent SQL injection.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
-            self._remove(document_id, verbose=verbose)
+            self._remove(document_id, conn=conn, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Deleted document: '{document_id}' in {dur:.3f} ms")
         return None
@@ -132,6 +147,7 @@ class Documents:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> Pagination[DocumentType]:
         """
@@ -146,10 +162,11 @@ class Documents:
                 before=before,
                 limit=limit,
                 order=order,
-                verbose=verbose,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
             )
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Listed documents in {dur:.3f} ms")
         return out
@@ -163,6 +180,7 @@ class Documents:
         before: typing.Optional[typing.Text] = None,
         limit: int = 20,
         order: typing.Literal["asc", "desc"] = "asc",
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.Generator[DocumentType, None, None]:
         """
@@ -179,7 +197,8 @@ class Documents:
                 before=before,
                 limit=limit,
                 order=order,
-                verbose=verbose,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
             )
             has_more = documents.has_more
             current_after = documents.last_id
@@ -191,26 +210,31 @@ class Documents:
         *,
         document_id: typing.Optional[typing.Text] = None,
         content_md5: typing.Optional[typing.Text] = None,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> int:
         """
         Count the number of documents in the DuckDB database.
         Supports optional filtering by document_id and content_md5.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
         with Timer() as timer:
             out = self._count(
                 document_id=document_id,
                 content_md5=content_md5,
-                verbose=verbose,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
             )
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Counted documents in {dur:.3f} ms")
         return out
 
     def content_exists(
-        self, content_md5: typing.Text, *, verbose: bool | None = None
+        self,
+        content_md5: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> bool:
         """
         Check if a document with the given content_md5 exists in the database.
@@ -221,11 +245,12 @@ class Documents:
                 source_id=None,
                 limit=1,
                 order="asc",
-                verbose=verbose,
+                conn=conn,
+                verbose=self.dvs.v(verbose),
                 after=None,
                 before=None,
             )
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
             logger.debug(f"Checked content_md5 in {dur:.3f} ms")
         return len(out.data) > 0
@@ -233,6 +258,7 @@ class Documents:
     def drop(
         self,
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         force: bool = False,
         verbose: bool | None = None,
         touch_after_drop: bool = True,
@@ -245,84 +271,101 @@ class Documents:
         if not force:
             raise ValueError("Use force=True to drop table.")
 
-        verbose = self.dvs.verbose if verbose is None else verbose
-
         with Timer() as timer:
-            self._drop(verbose=verbose)
+            self._drop(conn=conn, verbose=self.dvs.v(verbose))
 
         if touch_after_drop:
-            self._touch(verbose=verbose)
+            self._touch(conn=conn, verbose=self.dvs.v(verbose))
 
-        if verbose:
+        if self.dvs.v(verbose):
             dur = timer.duration * 1000
-            logger.debug(f"Dropped table: '{dvs.DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms")
+            logger.debug(
+                f"Dropped table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' in {dur:.3f} ms"
+            )
 
         return None
 
-    def _touch(self, *, verbose: bool | None = None) -> bool:
+    def _touch(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> bool:
         """
         Ensure the existence of the documents table in the DuckDB database.
         """
         # Install JSON and VSS extensions
-        self.dvs.db.install_extensions(verbose=verbose)
+        self.dvs.db.install_extensions(verbose=self.dvs.v(verbose))
 
-        # Create table
-        create_table_sql = openapi_utils.openapi_to_create_table_sql(
-            DocumentType.model_json_schema(),
-            table_name=dvs.DOCUMENTS_TABLE_NAME,
-            primary_key="document_id",
-            unique_fields=[],
-            # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
-            indexes=["content_md5", "source_id"],
-        )
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nCreating table: '{dvs.DOCUMENTS_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=create_table_sql)}\n"
+        with Timer() as timer:
+            # Create table
+            create_table_sql = openapi_utils.openapi_to_create_table_sql(
+                DocumentType.model_json_schema(),
+                table_name=dvs.DVS_DOCUMENTS_TABLE_NAME,
+                primary_key="document_id",
+                unique_fields=[],
+                # unique_fields=["name"],  # Index limitations (https://duckdb.org/docs/sql/indexes)  # noqa: E501
+                indexes=["content_md5", "source_id"],
             )
 
-        try:
-            self.dvs.conn.sql(create_table_sql)
-        except duckdb.CatalogException as e:
-            if "already exists" in str(e).lower():
-                logger.debug(f"Table '{dvs.DOCUMENTS_TABLE_NAME}' already exists")
-            else:
-                raise e
+            try:
+                conn = conn or self.dvs.new_connection()
+                conn.cursor().sql(create_table_sql)
+            except duckdb.CatalogException as e:
+                if "already exists" in str(e).lower():
+                    logger.debug(
+                        f"Table '{dvs.DVS_DOCUMENTS_TABLE_NAME}' already exists"
+                    )
+                else:
+                    raise e
+
+        debug_print(
+            create_table_sql,
+            title=f"Creating table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
 
         return True
 
     def _retrieve(
-        self, document_id: typing.Text, *, verbose: bool | None = None
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
     ) -> DocumentType:
         """
         Retrieve a document from the DuckDB database by its ID.
         """
-        verbose = self.dvs.verbose if verbose is None else verbose
 
         columns = list(DocumentType.model_json_schema()["properties"].keys())
         columns = [c for c in columns if c != "embedding"]
         columns_expr = ",".join(columns)
 
         query = (
-            f"SELECT {columns_expr} FROM {dvs.DOCUMENTS_TABLE_NAME} "
+            f"SELECT {columns_expr} FROM {dvs.DVS_DOCUMENTS_TABLE_NAME} "
             + "WHERE document_id = ?"
         )
         parameters = [document_id]
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nRetrieving document: '{document_id}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
 
-        result = self.dvs.conn.execute(query, parameters).fetchone()
+        with Timer() as timer:
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
-        if result is None:
-            raise NotFoundError(
-                f"Document with ID '{document_id}' not found.",
-                response=dummy_httpx_response(404, b"Not Found"),
-                body=None,
-            )
+            if result is None:
+                raise NotFoundError(
+                    f"Document with ID '{document_id}' not found.",
+                    response=dummy_httpx_response(404, b"Not Found"),
+                    body=None,
+                )
+
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title=f"Retrieving document: '{document_id}' with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
 
         data = dict(zip(columns, result))
         data["metadata"] = json.loads(data["metadata"])
@@ -334,6 +377,7 @@ class Documents:
         self,
         documents: typing.Sequence[DocumentType],
         *,
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None = None,
     ) -> typing.List[DocumentType]:
         """
@@ -351,38 +395,48 @@ class Documents:
         ]
 
         query = (
-            f"INSERT INTO {dvs.DOCUMENTS_TABLE_NAME} ({columns_expr}) "
+            f"INSERT INTO {dvs.DVS_DOCUMENTS_TABLE_NAME} ({columns_expr}) "
             + f"VALUES ({placeholders})"
         )
-        if verbose:
-            _display_params = display_sql_parameters(parameters)
-            self.dvs.settings.console.print(
-                "\nCreating documents with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=_display_params)}\n"
-            )
 
-        # Create documents
-        self.dvs.conn.executemany(query, parameters)
+        with Timer() as timer:
+            # Create documents
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().executemany(query, parameters)
 
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=display_sql_parameters(parameters))}",  # noqa: E501
+            title="Creating documents with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
         return list(documents)
 
-    def _remove(self, document_id: typing.Text, *, verbose: bool | None) -> None:
+    def _remove(
+        self,
+        document_id: typing.Text,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None,
+    ) -> None:
         """
         Remove a document from the DuckDB database by its ID.
         """
         # Prepare delete query
-        query = f"DELETE FROM {dvs.DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
+        query = f"DELETE FROM {dvs.DVS_DOCUMENTS_TABLE_NAME} WHERE document_id = ?"
         parameters = [document_id]
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDeleting document: '{document_id}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
 
-        # Delete document
-        self.dvs.conn.execute(query, parameters)
+        with Timer() as timer:
+            # Delete document
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().execute(query, parameters)
+
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Deleting document with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
 
         return None
 
@@ -395,6 +449,7 @@ class Documents:
         before: typing.Optional[typing.Text],
         limit: int,
         order: typing.Literal["asc", "desc"],
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None,
     ) -> Pagination[DocumentType]:
         """
@@ -403,7 +458,7 @@ class Documents:
         columns = list(DocumentType.model_json_schema()["properties"].keys())
         columns_expr = ",".join(columns)
 
-        query = f"SELECT {columns_expr} FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
+        query = f"SELECT {columns_expr} FROM {dvs.DVS_DOCUMENTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
@@ -431,14 +486,17 @@ class Documents:
         fetch_limit = limit + 1
         query += f"LIMIT {fetch_limit}"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nListing documents with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        with Timer() as timer:
+            conn = conn or self.dvs.new_connection(read_only=True)
+            results = conn.cursor().execute(query, parameters).fetchall()
 
-        results = self.dvs.conn.execute(query, parameters).fetchall()
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Listing documents with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+
         results = [
             {
                 column: (json.loads(value) if column == "metadata" else value)
@@ -466,12 +524,13 @@ class Documents:
         *,
         document_id: typing.Optional[typing.Text],
         content_md5: typing.Optional[typing.Text],
+        conn: duckdb.DuckDBPyConnection | None = None,
         verbose: bool | None,
     ) -> int:
         """
         Count the number of documents in the DuckDB database with optional filters.
         """
-        query = f"SELECT COUNT(*) FROM {dvs.DOCUMENTS_TABLE_NAME}\n"
+        query = f"SELECT COUNT(*) FROM {dvs.DVS_DOCUMENTS_TABLE_NAME}\n"
         where_clauses: typing.List[typing.Text] = []
         parameters: typing.List[typing.Text] = []
 
@@ -485,32 +544,43 @@ class Documents:
         if where_clauses:
             query += "WHERE " + " AND ".join(where_clauses) + "\n"
 
-        if verbose:
-            self.dvs.settings.console.print(
-                "\nCounting documents with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-                + f"{DISPLAY_SQL_PARAMS.format(params=parameters)}\n"
-            )
+        with Timer() as timer:
+            conn = conn or self.dvs.new_connection(read_only=True)
+            result = conn.cursor().execute(query, parameters).fetchone()
 
-        result = self.dvs.conn.execute(query, parameters).fetchone()
+        debug_print(
+            f"{query}\n{DISPLAY_SQL_PARAMS.format(params=parameters)}",
+            title="Counting documents with SQL:",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
+
         count = result[0] if result else 0
 
         return count
 
-    def _drop(self, *, verbose: bool | None = None) -> None:
+    def _drop(
+        self,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+        verbose: bool | None = None,
+    ) -> None:
         """
         Drop the documents table from the DuckDB database.
         """  # noqa: E501
         query_template = jinja2.Template(SQL_STMT_DROP_TABLE)
-        query = query_template.render(table_name=dvs.DOCUMENTS_TABLE_NAME)
+        query = query_template.render(table_name=dvs.DVS_DOCUMENTS_TABLE_NAME)
 
-        if verbose:
-            self.dvs.settings.console.print(
-                f"\nDropping table: '{dvs.DOCUMENTS_TABLE_NAME}' with SQL:\n"
-                + f"{DISPLAY_SQL_QUERY.format(sql=query)}\n"
-            )
+        with Timer() as timer:
+            # Drop table
+            conn = conn or self.dvs.new_connection()
+            conn.cursor().sql(query)
 
-        # Drop table
-        self.dvs.conn.sql(query)
+        debug_print(
+            f"{query}",
+            title=f"Dropping table: '{dvs.DVS_DOCUMENTS_TABLE_NAME}' with SQL",
+            footer=f"Duration: {timer.duration * 1000:.3f} ms",
+            verbose=self.dvs.v(verbose),
+        )
 
         return None

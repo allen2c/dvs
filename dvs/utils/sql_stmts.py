@@ -39,7 +39,7 @@ SQL_STMT_GET_BY_DOC_IDS: Final[Text] = dedent(
 
 # SQL Create index
 SQL_STMT_CREATE_INDEX: Final[Text] = (
-    "CREATE INDEX idx_{table_name}_{column_name} ON {table_name} ({column_name});"
+    "CREATE INDEX idx_{table_name}_{column_name} ON {table_name} ({column_name})"
 )
 
 # SQL Create embedding index
@@ -63,12 +63,17 @@ SQL_STMT_HNSW_COMPACT_INDEX: Final[Text] = (
 )
 
 # SQL Install extensions
+SQL_STMT_LOAD_VSS: Final[Text] = "LOAD vss;"
+SQL_STMT_LOAD_JSON: Final[Text] = "LOAD json;"
+SQL_STMT_LOAD_DUCKPGQ: Final[Text] = "LOAD duckpgq;"
 SQL_STMT_INSTALL_EXTENSIONS: Final[Text] = dedent(
     """
     INSTALL vss;
     LOAD vss;
     INSTALL json;
     LOAD json;
+    INSTALL duckpgq FROM community;
+    LOAD duckpgq;
     """
 ).strip()
 
